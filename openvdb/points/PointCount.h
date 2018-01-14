@@ -359,8 +359,10 @@ pointCountGrid(const PointDataGridT& points,
                                    const std::vector<Name>& includeGroups,
                                    const std::vector<Name>& excludeGroups)
 {
-    return point_mask_internal::convertPointsToScalar<PointDataGridT, GridT>(
-        points, includeGroups, excludeGroups);
+    // This is safe because the the PointDataGrid can only be modified by the deformer
+    PointDataGridT& nonConstPoints = const_cast<PointDataGrid&>(points);
+    return point_mask_internal::convertPointsToScalar<GridT>(
+        nonConstPoints, includeGroups, excludeGroups);
 }
 
 
@@ -373,8 +375,11 @@ pointCountGrid(const PointDataGridT& points,
     const std::vector<Name>& includeGroups,
     const std::vector<Name>& excludeGroups)
 {
-    return point_mask_internal::convertPointsToScalar<PointDataGridT, GridT>(
-        points, transform, includeGroups, excludeGroups);
+    // This is safe because the the PointDataGrid can only be modified by the deformer
+    PointDataGridT& nonConstPoints = const_cast<PointDataGrid&>(points);
+    NullDeformer deformer;
+    return point_mask_internal::convertPointsToScalar<GridT>(
+        nonConstPoints, transform, deformer, includeGroups, excludeGroups);
 }
 
 
