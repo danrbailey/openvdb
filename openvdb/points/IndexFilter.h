@@ -33,6 +33,32 @@
 /// @author Dan Bailey
 ///
 /// @brief  Index filters primarily designed to be used with a FilterIndexIter.
+///
+/// Filters must adhere to the interface described in the example below:
+/// @code
+/// struct MyFilter
+/// {
+///     // Return true when the filter has been initialized for first use
+///     bool initialized() { return true; }
+///
+///     // Returns true if for any possible iterator, this filter will always return
+///     // true when calling valid()
+///     bool all() { return true; }
+///
+///     // Returns false if for any possible iterator, this filter will always return
+///     // false when calling valid()
+///     bool none() { return false; }
+///
+///     // Resets the filter to refer to the specified leaf, all subsequent valid() calls
+///     // will be relative to this leaf until reset() is called with a different leaf.
+///     // Although a required method, many filters will provide an empty implementation if
+///     // there is no leaf-specific logic needed.
+///     template <typename LeafT> void reset(const LeafT&) { }
+///
+///     // Returns true if the filter is valid for the supplied iterator
+///     template <typename IterT> bool valid(const IterT&) { return true; }
+/// };
+/// @endcode
 
 #ifndef OPENVDB_POINTS_INDEX_FILTER_HAS_BEEN_INCLUDED
 #define OPENVDB_POINTS_INDEX_FILTER_HAS_BEEN_INCLUDED
@@ -142,6 +168,9 @@ public:
 
     inline bool initialized() const { return mInitialized; }
 
+    inline bool none() const { return false; }
+    inline bool all() const { return mInclude.empty() && mExclude.empty(); }
+
     template <typename LeafT>
     void reset(const LeafT& leaf) {
         mIncludeHandles.clear();
@@ -226,6 +255,9 @@ public:
 
     inline bool initialized() const { return mNextIndex == -1; }
 
+    inline bool none() const { return false; }
+    inline bool all() const { return false; }
+
     template <typename LeafT>
     void reset(const LeafT& leaf) {
         using index_filter_internal::generateRandomSubset;
@@ -297,6 +329,9 @@ public:
 
     inline bool initialized() const { return bool(mIdHandle); }
 
+    inline bool none() const { return false; }
+    inline bool all() const { return false; }
+
     template <typename LeafT>
     void reset(const LeafT& leaf) {
         assert(leaf.hasAttribute(mIndex));
@@ -349,6 +384,9 @@ public:
     }
 
     inline bool initialized() const { return bool(mPositionHandle); }
+
+    inline bool none() const { return false; }
+    inline bool all() const { return false; }
 
     template <typename LeafT>
     void reset(const LeafT& leaf) {
@@ -410,6 +448,9 @@ public:
 
     inline bool initialized() const { return bool(mPositionHandle); }
 
+    inline bool none() const { return mBbox.empty(); }
+    inline bool all() const { return false; }
+
     template <typename LeafT>
     void reset(const LeafT& leaf) {
         mPositionHandle.reset(new Handle(leaf.constAttributeArray("P")));
@@ -449,6 +490,17 @@ public:
         , mFilter2(filter2) { }
 
     inline bool initialized() const { return mFilter1.initialized() && mFilter2.initialized(); }
+
+    inline bool none() const
+    {
+        if (And)    return mFilter1.none() || mFilter2.none();
+        return mFilter1.none() && mFilter2.none();
+    }
+    inline bool all() const
+    {
+        if (And)    return mFilter1.all() && mFilter2.all();
+        return mFilter1.all() || mFilter2.all();
+    }
 
     template <typename LeafT>
     void reset(const LeafT& leaf) {

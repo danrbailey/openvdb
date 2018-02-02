@@ -240,27 +240,25 @@ inline typename GridT::Ptr convertPointsToScalar(
 
     if (points.constTree().leafCount() == 0)            return grid;
 
-    const bool useGroup = !includeGroups.empty() || !excludeGroups.empty();
+    const auto leaf = points.constTree().cbeginLeaf();
+    MultiGroupFilter filter(includeGroups, excludeGroups, leaf->attributeSet());
 
     // early exit if mask and no group logic
 
-    if (std::is_same<ValueT, bool>::value && !useGroup) return grid;
+    if (std::is_same<ValueT, bool>::value && filter.all()) return grid;
 
     // evaluate point group filters to produce a subset of the generated mask
 
     tree::LeafManager<GridTreeT> leafManager(*tree);
 
-    if (useGroup) {
-        // build mask from points in parallel only where filter evaluates to true
-        const auto leaf = points.constTree().cbeginLeaf();
-        MultiGroupFilter filter(includeGroups, excludeGroups, leaf->attributeSet());
-        PointsToScalarOp<GridT, PointDataGridT, MultiGroupFilter> pointsToScalarOp(
-            points, filter);
-        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
-    }
-    else {
-        NullFilter filter;
+    if (filter.all()) {
+        NullFilter nullFilter;
         PointsToScalarOp<GridT, PointDataGridT, NullFilter> pointsToScalarOp(
+            points, nullFilter);
+        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+    } else {
+        // build mask from points in parallel only where filter evaluates to true
+        PointsToScalarOp<GridT, PointDataGridT, MultiGroupFilter> pointsToScalarOp(
             points, filter);
         tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
     }
@@ -304,18 +302,15 @@ inline typename GridT::Ptr convertPointsToScalar(
 
     tree::LeafManager<const typename PointDataGridT::TreeType> leafManager(points.tree());
 
-    const bool useGroup = !includeGroups.empty() || !excludeGroups.empty();
-
-    if (useGroup) {
-        const auto leaf = points.constTree().cbeginLeaf();
-        MultiGroupFilter filter(includeGroups, excludeGroups, leaf->attributeSet());
-        PointsToTransformedScalarOp<GridT, PointDataGridT, MultiGroupFilter> pointsToScalarOp(
-            transform, pointsTransform, filter, combiner);
-        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
-    }
-    else {
-        NullFilter filter;
+    const auto leaf = points.constTree().cbeginLeaf();
+    MultiGroupFilter filter(includeGroups, excludeGroups, leaf->attributeSet());
+    if (filter.all()) {
+        NullFilter nullFilter;
         PointsToTransformedScalarOp<GridT, PointDataGridT, NullFilter> pointsToScalarOp(
+            transform, pointsTransform, nullFilter, combiner);
+        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+    } else {
+        PointsToTransformedScalarOp<GridT, PointDataGridT, MultiGroupFilter> pointsToScalarOp(
             transform, pointsTransform, filter, combiner);
         tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
     }

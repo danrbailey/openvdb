@@ -167,6 +167,9 @@ public:
 
     inline bool initialized() const { return bool(mHandle); }
 
+    inline bool none() const { return false; }
+    inline bool all() const { return false; }
+
     template <typename LeafT>
     void reset(const LeafT& leaf) {
         mHandle.reset(new GroupHandle(leaf.groupHandle(mIndex)));

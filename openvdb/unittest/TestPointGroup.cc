@@ -78,6 +78,8 @@ class FirstFilter
 {
 public:
     static bool initialized() { return true; }
+    static bool none() { return false; }
+    static bool all() { return false; }
 
     template <typename LeafT> void reset(const LeafT&) { }
 

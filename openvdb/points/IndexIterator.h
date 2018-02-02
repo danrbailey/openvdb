@@ -59,10 +59,13 @@ inline Index64 iterCount(const IterT& iter);
 
 
 /// @brief A no-op filter that can be used when iterating over all indices
+/// @see points/IndexFilter.h for the documented interface for an index filter
 class NullFilter
 {
 public:
     static bool initialized() { return true; }
+    static bool all() { return true; }
+    static bool none() { return false; }
     template <typename LeafT> void reset(const LeafT&) { }
     template <typename IterT> static bool valid(const IterT&) { return true; }
 }; // class NullFilter

@@ -318,8 +318,7 @@ Index64 getPointOffsets(std::vector<Index64>& pointOffsets, const PointDataTreeT
                      const bool inCoreOnly)
 {
     using LeafNode = typename PointDataTreeT::LeafNodeType;
-
-    const bool useGroup = includeGroups.size() > 0 || excludeGroups.size() > 0;
+    using IndexFilterIterT = IndexIter<typename LeafNode::ValueOnCIter, MultiGroupFilter>;
 
     tree::LeafManager<const PointDataTreeT> leafManager(tree);
     const size_t leafCount = leafManager.leafCount();
@@ -337,15 +336,14 @@ Index64 getPointOffsets(std::vector<Index64>& pointOffsets, const PointDataTreeT
             continue;
         }
 
-        if (useGroup) {
-            auto iter = leaf.beginValueOn();
-            MultiGroupFilter filter(includeGroups, excludeGroups, leaf.attributeSet());
-            filter.reset(leaf);
-            IndexIter<typename LeafNode::ValueOnCIter, MultiGroupFilter> filterIndexIter(iter, filter);
-            pointOffset += iterCount(filterIndexIter);
-        }
-        else {
+        MultiGroupFilter filter(includeGroups, excludeGroups, leaf.attributeSet());
+        if (filter.all()) {
             pointOffset += leaf.onPointCount();
+        } else {
+            auto iter = leaf.beginValueOn();
+            filter.reset(leaf);
+            IndexFilterIterT filterIndexIter(iter, filter);
+            pointOffset += iterCount(filterIndexIter);
         }
         pointOffsets.push_back(pointOffset);
     }
