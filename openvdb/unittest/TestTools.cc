@@ -1267,46 +1267,142 @@ TestTools::testInteriorMask()
     CPPUNIT_ASSERT_EQUAL(intBand.volume(), mask->activeVoxelCount());
 }
 
+namespace {
+    template <typename TreeT>
+    static openvdb::Index64 countNegativeVoxels(const TreeT& tree)
+    {
+        openvdb::Index64 total(0);
+        for (auto leaf = tree.cbeginLeaf(); leaf; ++leaf) {
+            for (auto iter = leaf->cbeginValueOn(); iter; ++iter) {
+                if (iter.getValue() < 0) {
+                    total++;
+                }
+            }
+        }
+        return total;
+    }
+}
+
 
 void
 TestTools::testLevelSetSphere()
 {
-    const float radius = 4.3f;
-    const openvdb::Vec3f center(15.8f, 13.2f, 16.7f);
-    const float voxelSize = 1.5f, width = 3.25f;
-    const int dim = 32;
+    { // test sphere
+        const float radius = 4.3f;
+        const openvdb::Vec3f center(15.8f, 13.2f, 16.7f);
+        const float voxelSize = 1.5f, width = 3.25f;
+        const int dim = 32;
 
-    openvdb::FloatGrid::Ptr grid1 =
-        openvdb::tools::createLevelSetSphere<openvdb::FloatGrid>(radius, center, voxelSize, width);
+        openvdb::FloatGrid::Ptr grid1 =
+            openvdb::tools::createLevelSetSphere<openvdb::FloatGrid>(radius, center, voxelSize, width);
 
-    /// Also test ultra slow makeSphere in unittest/util.h
-    openvdb::FloatGrid::Ptr grid2 = openvdb::createLevelSet<openvdb::FloatGrid>(voxelSize, width);
-    unittest_util::makeSphere<openvdb::FloatGrid>(
-        openvdb::Coord(dim), center, radius, *grid2, unittest_util::SPHERE_SPARSE_NARROW_BAND);
+        /// Also test ultra slow makeSphere in unittest/util.h
+        openvdb::FloatGrid::Ptr grid2 = openvdb::createLevelSet<openvdb::FloatGrid>(voxelSize, width);
+        unittest_util::makeSphere<openvdb::FloatGrid>(
+            openvdb::Coord(dim), center, radius, *grid2, unittest_util::SPHERE_SPARSE_NARROW_BAND);
 
-    const float outside = grid1->background(), inside = -outside;
-    for (int i=0; i<dim; ++i) {
-        for (int j=0; j<dim; ++j) {
-            for (int k=0; k<dim; ++k) {
-                const openvdb::Vec3f p(voxelSize*float(i), voxelSize*float(j), voxelSize*float(k));
-                const float dist = (p-center).length() - radius;
-                const float val1 = grid1->tree().getValue(openvdb::Coord(i,j,k));
-                const float val2 = grid2->tree().getValue(openvdb::Coord(i,j,k));
-                if (dist > outside) {
-                    CPPUNIT_ASSERT_DOUBLES_EQUAL( outside, val1, 0.0001);
-                    CPPUNIT_ASSERT_DOUBLES_EQUAL( outside, val2, 0.0001);
-                } else if (dist < inside) {
-                    CPPUNIT_ASSERT_DOUBLES_EQUAL( inside, val1, 0.0001);
-                    CPPUNIT_ASSERT_DOUBLES_EQUAL( inside, val2, 0.0001);
-                } else {
-                    CPPUNIT_ASSERT_DOUBLES_EQUAL(  dist, val1, 0.0001);
-                    CPPUNIT_ASSERT_DOUBLES_EQUAL(  dist, val2, 0.0001);
+        const float outside = grid1->background(), inside = -outside;
+        for (int i=0; i<dim; ++i) {
+            for (int j=0; j<dim; ++j) {
+                for (int k=0; k<dim; ++k) {
+                    const openvdb::Vec3f p(voxelSize*float(i), voxelSize*float(j), voxelSize*float(k));
+                    const float dist = (p-center).length() - radius;
+                    const float val1 = grid1->tree().getValue(openvdb::Coord(i,j,k));
+                    const float val2 = grid2->tree().getValue(openvdb::Coord(i,j,k));
+                    if (dist > outside) {
+                        CPPUNIT_ASSERT_DOUBLES_EQUAL( outside, val1, 0.0001);
+                        CPPUNIT_ASSERT_DOUBLES_EQUAL( outside, val2, 0.0001);
+                    } else if (dist < inside) {
+                        CPPUNIT_ASSERT_DOUBLES_EQUAL( inside, val1, 0.0001);
+                        CPPUNIT_ASSERT_DOUBLES_EQUAL( inside, val2, 0.0001);
+                    } else {
+                        CPPUNIT_ASSERT_DOUBLES_EQUAL(  dist, val1, 0.0001);
+                        CPPUNIT_ASSERT_DOUBLES_EQUAL(  dist, val2, 0.0001);
+                    }
                 }
             }
         }
+
+        CPPUNIT_ASSERT_EQUAL(grid1->activeVoxelCount(), grid2->activeVoxelCount());
     }
 
-    CPPUNIT_ASSERT_EQUAL(grid1->activeVoxelCount(), grid2->activeVoxelCount());
+    { // test notched sphere
+        const float radius = 12.3f;
+        const openvdb::Vec3f center(15.8f, 13.2f, 16.7f);
+        const float notchWidth = 0.5f, notchDepth = 1.5f;
+        const float voxelSize = 1.5f, width = 3.25f;
+
+        // sphere
+        openvdb::FloatGrid::Ptr sphere1 =
+            openvdb::tools::createLevelSetSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, width);
+        CPPUNIT_ASSERT(sphere1);
+
+        // notched sphere
+        openvdb::FloatGrid::Ptr notch1 =
+            openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, notchWidth, notchDepth, width);
+        CPPUNIT_ASSERT(notch1);
+
+        // verify voxel bounding box dimensions
+        openvdb::CoordBBox bboxSphere1, bboxNotch1;
+        sphere1->tree().evalActiveVoxelBoundingBox(bboxSphere1);
+        notch1->tree().evalActiveVoxelBoundingBox(bboxNotch1);
+        CPPUNIT_ASSERT_EQUAL(bboxNotch1, bboxSphere1);
+
+        // test a few positions in the sphere and in and around the notch
+        openvdb::Coord centerVoxel(openvdb::Coord::round(bboxNotch1.getCenter()));
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel) < 0);
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel.offsetBy(0,5,0)) < 0);
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel.offsetBy(0,-5,0)) < 0);
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel.offsetBy(5,0,0)) < 0);
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel.offsetBy(-5,0,0)) < 0);
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel.offsetBy(0,0,5)) < 0);
+        CPPUNIT_ASSERT(sphere1->tree().getValue(centerVoxel.offsetBy(0,0,-5)) < 0);
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel) > 0); // inside notch
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel.offsetBy(0,5,0)) > 0); // inside notch
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel.offsetBy(0,-5,0)) < 0); // below notch
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel.offsetBy(5,0,0)) < 0); // adjacent to notch
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel.offsetBy(-5,0,0)) < 0); // adjacent to notch
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel.offsetBy(0,0,5)) > 0); // inside notch
+        CPPUNIT_ASSERT(notch1->tree().getValue(centerVoxel.offsetBy(0,0,-5)) > 0); // inside notch
+
+        // verify notched sphere contains fewer interior voxels than sphere
+        const openvdb::Index64 insideNotch1 = countNegativeVoxels<openvdb::FloatTree>(notch1->tree());
+        const openvdb::Index64 insideSphere1 = countNegativeVoxels<openvdb::FloatTree>(sphere1->tree());
+        CPPUNIT_ASSERT(insideNotch1 > 0);
+        CPPUNIT_ASSERT(insideNotch1 < insideSphere1);
+
+        // notched sphere (wider notch)
+        openvdb::FloatGrid::Ptr notch2 =
+            openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, /*notchWidth*/1.5f, notchDepth, width);
+        CPPUNIT_ASSERT(countNegativeVoxels<openvdb::FloatTree>(notch2->tree()) < insideNotch1);
+
+        // notched sphere (zero width notch)
+        openvdb::FloatGrid::Ptr notch3 =
+            openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, /*notchWidth*/0.0f, notchDepth, width);
+        CPPUNIT_ASSERT_EQUAL(insideSphere1, countNegativeVoxels<openvdb::FloatTree>(notch3->tree()));
+
+        // notched sphere (deeper notch)
+        openvdb::FloatGrid::Ptr notch4 =
+            openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, notchWidth, /*notchDepth*/1.9f, width);
+        CPPUNIT_ASSERT(countNegativeVoxels<openvdb::FloatTree>(notch4->tree()) < insideNotch1);
+
+        // notched sphere (zero depth notch)
+        openvdb::FloatGrid::Ptr notch5 =
+            openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, notchWidth, /*notchDepth*/0.0f, width);
+        CPPUNIT_ASSERT_EQUAL(insideSphere1, countNegativeVoxels<openvdb::FloatTree>(notch5->tree()));
+
+        // notched sphere (notch as big as sphere)
+        openvdb::FloatGrid::Ptr notch6 =
+            openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid>(
+                radius, center, voxelSize, /*notchWidth=*/2.0f, /*notchDepth=*/2.0f, width);
+        CPPUNIT_ASSERT_EQUAL(openvdb::Index64(0), countNegativeVoxels<openvdb::FloatTree>(notch6->tree()));
+    }
 }// testLevelSetSphere
 
 void

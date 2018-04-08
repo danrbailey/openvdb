@@ -129,6 +129,22 @@ Signed Distance Field:\n\
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "fogVolume", "Convert to Fog Volume")
         .setTooltip("If enabled, generate a fog volume instead of a level set"));
 
+    // Enable notch (if sphere)
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "enablenotch", "Enable Notch")
+        .setTooltip("If enabled, add a notch to the sphere (known as Zalesak's disk)."));
+
+    // Notch width
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "notchwidth", "Notch Width")
+        .setDefault(0.5f)
+        .setRange(PRM_RANGE_RESTRICTED, 0, PRM_RANGE_RESTRICTED, 2)
+        .setTooltip("The relative width of the notch compared to the radius."));
+
+    // Notch depth
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "notchdepth", "Notch Depth")
+        .setDefault(1.5f)
+        .setRange(PRM_RANGE_RESTRICTED, 0, PRM_RANGE_RESTRICTED, 2)
+        .setTooltip("The relative depth of the notch compared to the radius."));
+
     // Register this operator.
     hvdb::OpenVDBOpFactory("OpenVDB Platonic",
         SOP_OpenVDB_Platonic::factory, parms, *table)
@@ -177,6 +193,19 @@ SOP_OpenVDB_Platonic::updateParmsFlags()
 
     changed |= enableParm("halfWidth", sdfGrid);
 
+    const bool sphere = evalInt("solidType", 0, 0) == 0;
+
+    changed |= setVisibleState("enablenotch", sphere);
+    changed |= setVisibleState("notchwidth", sphere);
+    changed |= setVisibleState("notchdepth", sphere);
+
+    changed |= enableParm("enablenotch", sphere);
+
+    const bool notch = sphere && evalInt("enablenotch", 0, 0);
+
+    changed |= enableParm("notchwidth", sphere && notch);
+    changed |= enableParm("notchdepth", sphere && notch);
+
     return changed;
 }
 
@@ -202,8 +231,16 @@ SOP_OpenVDB_Platonic::cookVDBSop(OP_Context& context)
         openvdb::FloatGrid::Ptr grid;
         switch (evalInt("solidType", 0, time)) {
         case 0://Sphere
-            grid = openvdb::tools::createLevelSetSphere<openvdb::FloatGrid, hvdb::Interrupter>
-                (radius, center, voxelSize, halfWidth, &boss);
+            // Add notch to sphere
+            if (bool(evalInt("enablenotch", 0, time))) {
+                const float notchWidth = static_cast<float>(evalFloat("notchwidth", 0, time));
+                const float notchDepth = static_cast<float>(evalFloat("notchdepth", 0, time));
+                grid = openvdb::tools::createLevelSetNotchedSphere<openvdb::FloatGrid, hvdb::Interrupter>
+                    (radius, center, voxelSize, notchWidth, notchDepth, halfWidth, &boss);
+            } else {
+                grid = openvdb::tools::createLevelSetSphere<openvdb::FloatGrid, hvdb::Interrupter>
+                    (radius, center, voxelSize, halfWidth, &boss);
+            }
             break;
         case 1:// Tetrahedraon
             grid = openvdb::tools::createLevelSetTetrahedron<openvdb::FloatGrid, hvdb::Interrupter>

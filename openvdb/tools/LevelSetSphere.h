@@ -43,6 +43,8 @@
 #include <openvdb/Types.h>
 #include <openvdb/math/Math.h>
 #include <openvdb/util/NullInterrupter.h>
+#include "Composite.h" // csgDifference()
+#include "MeshToVolume.h"
 #include "SignedFloodFill.h"
 #include <type_traits>
 
@@ -88,6 +90,52 @@ createLevelSetSphere(float radius, const openvdb::Vec3f& center, float voxelSize
                      float halfWidth = float(LEVEL_SET_HALF_WIDTH))
 {
     return createLevelSetSphere<GridType, util::NullInterrupter>(radius,center,voxelSize,halfWidth);
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+/// @brief Return a grid of type @c GridType containing a narrow-band level set
+/// representation of a notched sphere, typically referred to as Zalesak's disk.
+///
+/// @param radius       radius of the notched sphere in world units
+/// @param center       center of the notched sphere in world units
+/// @param voxelSize    voxel size in world units
+/// @param notchWidth   relative width of the notch (compared to radius)
+/// @param notchDepth   relative depth of the notch (compared to radius)
+/// @param halfWidth    half the width of the narrow band, in voxel units
+/// @param interrupt    a pointer adhering to the util::NullInterrupter interface
+///
+/// @note @c GridType::ValueType must be a floating-point scalar.
+template<typename GridType, typename InterruptT>
+typename GridType::Ptr
+createLevelSetNotchedSphere(float radius, const openvdb::Vec3f& center, float voxelSize,
+    float notchWidth = 0.5f, float notchDepth = 1.5f,
+    float halfWidth = float(LEVEL_SET_HALF_WIDTH), InterruptT* interrupt = nullptr);
+
+/// @brief Return a grid of type @c GridType containing a narrow-band level set
+/// representation of a sphere, typically referred to as Zalesak's disk.
+///
+/// @param radius       radius of the sphere in world units
+/// @param center       center of the sphere in world units
+/// @param voxelSize    voxel size in world units
+/// @param notchWidth   relative width of the notch (compared to radius)
+/// @param notchDepth   relative depth of the notch (compared to radius)
+/// @param halfWidth    half the width of the narrow band, in voxel units
+///
+/// @note @c GridType::ValueType must be a floating-point scalar.
+/// @note The leapfrog algorithm employed in this method is best suited
+/// for a single large sphere.  For multiple small spheres consider
+/// using the faster algorithm in ParticlesToLevelSet.h
+template<typename GridType>
+typename GridType::Ptr
+createLevelSetNotchedSphere(float radius, const openvdb::Vec3f& center, float voxelSize,
+                            float notchWidth = 0.5f, float notchDepth = 1.5f,
+                            float halfWidth = float(LEVEL_SET_HALF_WIDTH))
+{
+    return createLevelSetNotchedSphere<GridType, util::NullInterrupter>(
+        radius,center,voxelSize,notchWidth,notchDepth,halfWidth);
 }
 
 
@@ -211,6 +259,61 @@ createLevelSetSphere(float radius, const openvdb::Vec3f& center, float voxelSize
     using ValueT = typename GridType::ValueType;
     LevelSetSphere<GridType, InterruptT> factory(ValueT(radius), center, interrupt);
     return factory.getLevelSet(ValueT(voxelSize), ValueT(halfWidth));
+}
+
+
+template<typename GridType, typename InterruptT>
+typename GridType::Ptr
+createLevelSetNotchedSphere(float radius, const openvdb::Vec3f& center, float voxelSize,
+        float notchWidth, float notchDepth, float halfWidth, InterruptT* interrupt)
+{
+    // clamp notch width and depth to 0 and sphere diameter
+
+    notchWidth = math::Clamp(notchWidth, 0.0f, 2.0f);
+    notchDepth = math::Clamp(notchDepth, 0.0f, 2.0f);
+
+    // empty grid if notch consumes entire sphere
+
+    const float tolerance(math::Tolerance<float>::value());
+
+    if (notchWidth > 2.0f - tolerance &&
+        notchDepth > 2.0f - tolerance) {
+        return GridType::create(0);
+    }
+
+    auto sphere = createLevelSetSphere<GridType>(radius, center, voxelSize, halfWidth, interrupt);
+
+    // sphere if notch has zero volume
+
+    if (notchWidth < tolerance ||
+        notchDepth < tolerance) {
+        return sphere;
+    }
+
+    // create box for notch based on notch width and depth
+
+    const math::Transform::Ptr xform = math::Transform::createLinearTransform(voxelSize);
+
+    Vec3f min(center);
+    Vec3f max(center);
+
+    min.x() -= (radius * notchWidth) / 2;
+    min.y() -= (radius * (notchDepth - 1));
+    min.z() -= radius * 1.1;
+
+    max.x() += (radius * notchWidth) / 2;
+    max.y() += radius * 1.1;
+    max.z() += radius * 1.1;
+
+    math::BBox<Vec3f> bbox(min, max);
+
+    auto notch = tools::createLevelSetBox<GridType>(bbox, *xform, halfWidth);
+
+    // subtract notch from sphere
+
+    csgDifference(*sphere, *notch);
+
+    return sphere;
 }
 
 } // namespace tools
