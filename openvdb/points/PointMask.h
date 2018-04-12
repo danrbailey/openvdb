@@ -59,14 +59,16 @@ namespace points {
 /// @param grid             the PointDataGrid to extract the mask from.
 /// @param includeGroups    a vector of VDB Points groups to be included (default is all).
 /// @param excludeGroups    a vector of VDB Points groups to be excluded (default is none).
+/// @param threaded         enable or disable threading  (threading is enabled by default)
 /// @note this method is only available for Bool Grids and Mask Grids
 template <typename PointDataGridT,
           typename MaskT = typename PointDataGridT::template ValueConverter<bool>::Type>
 inline typename std::enable_if<std::is_same<typename MaskT::ValueType, bool>::value,
     typename MaskT::Ptr>::type
-convertPointsToMask(const PointDataGridT& grid,
+convertPointsToMask(PointDataGridT& grid,
                     const std::vector<Name>& includeGroups = std::vector<Name>(),
-                    const std::vector<Name>& excludeGroups = std::vector<Name>());
+                    const std::vector<Name>& excludeGroups = std::vector<Name>(),
+                    bool threaded = true);
 
 
 /// @brief Extract a Mask Grid from a Point Data Grid using a new transform
@@ -74,15 +76,17 @@ convertPointsToMask(const PointDataGridT& grid,
 /// @param transform        target transform for the mask.
 /// @param includeGroups    a vector of VDB Points groups to be included (default is all).
 /// @param excludeGroups    a vector of VDB Points groups to be excluded (default is none).
+/// @param threaded         enable or disable threading  (threading is enabled by default)
 /// @note this method is only available for Bool Grids and Mask Grids
 template <typename PointDataGridT,
           typename MaskT = typename PointDataGridT::template ValueConverter<bool>::Type>
 inline typename std::enable_if<std::is_same<typename MaskT::ValueType, bool>::value,
     typename MaskT::Ptr>::type
-convertPointsToMask(const PointDataGridT& grid,
+convertPointsToMask(PointDataGridT& grid,
                     const openvdb::math::Transform& transform,
                     const std::vector<Name>& includeGroups = std::vector<Name>(),
-                    const std::vector<Name>& excludeGroups = std::vector<Name>());
+                    const std::vector<Name>& excludeGroups = std::vector<Name>(),
+                    bool threaded = true);
 
 
 ////////////////////////////////////////
@@ -222,7 +226,8 @@ template<typename PointDataGridT, typename GridT>
 inline typename GridT::Ptr convertPointsToScalar(
     const PointDataGridT& points,
     const std::vector<Name>& includeGroups,
-    const std::vector<Name>& excludeGroups)
+    const std::vector<Name>& excludeGroups,
+    bool threaded = true)
 {
     using point_mask_internal::PointsToScalarOp;
 
@@ -255,12 +260,20 @@ inline typename GridT::Ptr convertPointsToScalar(
         NullFilter nullFilter;
         PointsToScalarOp<GridT, PointDataGridT, NullFilter> pointsToScalarOp(
             points, nullFilter);
-        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        if (threaded) {
+            tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        } else {
+            pointsToScalarOp(leafManager.leafRange());
+        }
     } else {
         // build mask from points in parallel only where filter evaluates to true
         PointsToScalarOp<GridT, PointDataGridT, MultiGroupFilter> pointsToScalarOp(
             points, filter);
-        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        if (threaded) {
+            tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        } else {
+            pointsToScalarOp(leafManager.leafRange());
+        }
     }
 
     return grid;
@@ -272,7 +285,8 @@ inline typename GridT::Ptr convertPointsToScalar(
     const PointDataGridT& points,
     const openvdb::math::Transform& transform,
     const std::vector<Name>& includeGroups,
-    const std::vector<Name>& excludeGroups)
+    const std::vector<Name>& excludeGroups,
+    bool threaded = true)
 {
     using point_mask_internal::PointsToTransformedScalarOp;
     using point_mask_internal::GridCombinerOp;
@@ -286,7 +300,7 @@ inline typename GridT::Ptr convertPointsToScalar(
 
     if (transform == pointsTransform) {
         return convertPointsToScalar<PointDataGridT, GridT>(
-            points, includeGroups, excludeGroups);
+            points, includeGroups, excludeGroups, threaded);
     }
 
     typename GridT::Ptr grid = GridT::create();
@@ -308,11 +322,19 @@ inline typename GridT::Ptr convertPointsToScalar(
         NullFilter nullFilter;
         PointsToTransformedScalarOp<GridT, PointDataGridT, NullFilter> pointsToScalarOp(
             transform, pointsTransform, nullFilter, combiner);
-        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        if (threaded) {
+            tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        } else {
+            pointsToScalarOp(leafManager.leafRange());
+        }
     } else {
         PointsToTransformedScalarOp<GridT, PointDataGridT, MultiGroupFilter> pointsToScalarOp(
             transform, pointsTransform, filter, combiner);
-        tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        if (threaded) {
+            tbb::parallel_for(leafManager.leafRange(), pointsToScalarOp);
+        } else {
+            pointsToScalarOp(leafManager.leafRange());
+        }
     }
 
     // combine the mask grids into one
@@ -336,10 +358,11 @@ inline typename std::enable_if<std::is_same<typename MaskT::ValueType, bool>::va
 convertPointsToMask(
     const PointDataGridT& points,
     const std::vector<Name>& includeGroups,
-    const std::vector<Name>& excludeGroups)
+    const std::vector<Name>& excludeGroups,
+    bool threaded)
 {
     return point_mask_internal::convertPointsToScalar<PointDataGridT, MaskT>(
-        points, includeGroups, excludeGroups);
+        points, includeGroups, excludeGroups, threaded);
 }
 
 
@@ -350,10 +373,11 @@ convertPointsToMask(
     const PointDataGridT& points,
     const openvdb::math::Transform& transform,
     const std::vector<Name>& includeGroups,
-    const std::vector<Name>& excludeGroups)
+    const std::vector<Name>& excludeGroups,
+    bool threaded)
 {
     return point_mask_internal::convertPointsToScalar<PointDataGridT, MaskT>(
-        points, transform, includeGroups, excludeGroups);
+        points, transform, includeGroups, excludeGroups, threaded);
 }
 
 
