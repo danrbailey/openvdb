@@ -377,8 +377,8 @@ struct BuildMoveMapsOp
                     mLocalMoveLeafMap[targetLeafOffset].emplace_back(targetOffset, *iter);
                 }
                 else {
-                    mGlobalMoveLeafMap[targetLeafOffset].emplace_back(leaf.pos(),
-                        targetOffset, *iter);
+                    mGlobalMoveLeafMap[targetLeafOffset].push_back(IndexTriple(leaf.pos(),
+                        targetOffset, *iter));
                 }
             }
         }
