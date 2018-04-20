@@ -425,8 +425,10 @@ convertPointsToMask(
     const std::vector<Name>& excludeGroups,
     bool threaded)
 {
-    // This is safe because the the PointDataGrid can only be modified by the deformer
-    auto& nonConstPoints = const_cast<PointDataGridT&>(points);
+    // This is safe because the PointDataGrid can only be modified by the deformer
+    using AdapterT = TreeAdapter<typename PointDataGridT::TreeType>;
+    auto& nonConstPoints = const_cast<typename AdapterT::NonConstGridType&>(points);
+
     return point_mask_internal::convertPointsToScalar<MaskT>(
         nonConstPoints, includeGroups, excludeGroups, threaded);
 }
@@ -442,8 +444,10 @@ convertPointsToMask(
     const std::vector<Name>& excludeGroups,
     bool threaded)
 {
-    // This is safe because the the PointDataGrid can only be modified by the deformer
-    auto& nonConstPoints = const_cast<PointDataGridT&>(points);
+    // This is safe because the PointDataGrid can only be modified by the deformer
+    using AdapterT = TreeAdapter<typename PointDataGridT::TreeType>;
+    auto& nonConstPoints = const_cast<typename AdapterT::NonConstGridType&>(points);
+
     NullDeformer deformer;
     return point_mask_internal::convertPointsToScalar<MaskT>(
         nonConstPoints, transform, deformer, includeGroups, excludeGroups, threaded);
