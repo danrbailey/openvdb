@@ -451,14 +451,20 @@ struct AttributeArray::Accessor : public AttributeArray::AccessorBase
     using GetterPtr = T (*)(const AttributeArray* array, const Index n);
     using SetterPtr = void (*)(AttributeArray* array, const Index n, const T& value);
     using ValuePtr  = void (*)(AttributeArray* array, const T& value);
+    using ResizePtr = void (*)(AttributeArray* array, const size_t n);
 
-    Accessor(GetterPtr getter, SetterPtr setter, ValuePtr collapser, ValuePtr filler) :
-        mGetter(getter), mSetter(setter), mCollapser(collapser), mFiller(filler) { }
+    Accessor(GetterPtr getter, SetterPtr setter,
+             ValuePtr collapser, ValuePtr filler,
+             ResizePtr resizer) :
+        mGetter(getter), mSetter(setter),
+        mCollapser(collapser), mFiller(filler),
+        mResizer(resizer) { }
 
     GetterPtr mGetter;
     SetterPtr mSetter;
     ValuePtr  mCollapser;
     ValuePtr  mFiller;
+    ResizePtr mResizer;
 }; // struct AttributeArray::Accessor
 
 
@@ -632,7 +638,7 @@ public:
 
     /// Return the stride of this array.
     /// @note A return value of zero means a variable stride
-    Index stride() const override { return hasConstantStride() ? mStrideOrTotalSize : 0; }
+    Index stride() const override { return hasConstantStride() ? mStrideOrTotalSize : 1; }
 
     /// Return the size of the data in this array.
     Index dataSize() const override {
@@ -668,6 +674,9 @@ public:
     /// Return @c true if the value type is a matrix
     bool valueTypeIsMatrix() const override;
 #endif
+
+    /// Set the total size of a dynamic array.
+    static void resize(AttributeArray* array, const size_t size);
 
     /// Return the number of bytes of memory used by this attribute.
     size_t memUsage() const override;
@@ -840,6 +849,7 @@ protected:
     using GetterPtr = ValueType (*)(const AttributeArray* array, const Index n);
     using SetterPtr = void (*)(AttributeArray* array, const Index n, const ValueType& value);
     using ValuePtr  = void (*)(AttributeArray* array, const ValueType& value);
+    using ResizePtr = void (*)(AttributeArray* array, const size_t n);
 
 public:
     static Ptr create(const AttributeArray& array, const bool collapseOnDestruction = true);
@@ -851,7 +861,7 @@ public:
 
     virtual ~AttributeHandle();
 
-    Index stride() const { return mStrideOrTotalSize; }
+    Index stride() const { return mStride; }
     Index size() const { return mSize; }
 
     bool isUniform() const;
@@ -864,12 +874,15 @@ public:
 protected:
     Index index(Index n, Index m) const;
 
+    void resetSize();
+
     const AttributeArray* mArray;
 
     GetterPtr mGetter;
     SetterPtr mSetter;
     ValuePtr  mCollapser;
     ValuePtr  mFiller;
+    ResizePtr mResizer;
 
 private:
     friend class ::TestAttributeArray;
@@ -889,7 +902,7 @@ private:
     // local copy of AttributeArray (to preserve compression)
     AttributeArray::Ptr mLocalArray;
 
-    Index mStrideOrTotalSize;
+    Index mStride;
     Index mSize;
     bool mCollapseOnDestruction;
 }; // class AttributeHandle
@@ -912,6 +925,9 @@ public:
     AttributeWriteHandle(AttributeArray& array, const bool expand = true);
 
     virtual ~AttributeWriteHandle() = default;
+
+    /// @brief Resize the dynamic array
+    void resize(const size_t newSize);
 
     /// @brief  If this array is uniform, replace it with an array of length size().
     /// @param  fill if true, assign the uniform value to each element of the array.
@@ -1131,22 +1147,11 @@ TypedAttributeArray<ValueType_, Codec_>::TypedAttributeArray(
     , mSize(n)
     , mStrideOrTotalSize(strideOrTotalSize)
 {
-    if (constantStride) {
-        this->setConstantStride(true);
-        if (strideOrTotalSize == 0) {
+    this->setConstantStride(constantStride);
+    if (constantStride && strideOrTotalSize == 0) {
             OPENVDB_THROW(ValueError, "Creating a TypedAttributeArray with a constant stride requires that " \
                                         "stride to be at least one.")
-        }
     }
-    else {
-        this->setConstantStride(false);
-        if (mStrideOrTotalSize < n) {
-            OPENVDB_THROW(ValueError, "Creating a TypedAttributeArray with a non-constant stride must have " \
-                                        "a total size of at least the number of elements in the array.")
-        }
-    }
-    mSize = std::max(Index(1), mSize);
-    mStrideOrTotalSize = std::max(Index(1), mStrideOrTotalSize);
     Codec::encode(uniformValue, this->data()[0]);
 }
 
@@ -1289,8 +1294,7 @@ TypedAttributeArray<ValueType_, Codec_>::allocate()
     }
     else {
         const size_t size(this->dataSize());
-        assert(size > 0);
-        mData.reset(new StorageType[size]);
+        mData.reset(new StorageType[std::max(size, size_t(1))]);
     }
 }
 
@@ -1363,6 +1367,19 @@ TypedAttributeArray<ValueType_, Codec_>::valueTypeIsMatrix() const
     return !this->valueType().compare(0, 3, "mat");
 }
 #endif
+
+
+template<typename ValueType_, typename Codec_>
+void
+TypedAttributeArray<ValueType_, Codec_>::resize(AttributeArray* array, const size_t size)
+{
+    if (array->hasConstantStride()) {
+        OPENVDB_THROW(ValueError, "Can only resize a dynamic array.")
+    }
+    static_cast<TypedAttributeArray<ValueType, Codec>*>(array)->mStrideOrTotalSize = size;
+    static_cast<TypedAttributeArray<ValueType, Codec>*>(array)->deallocate();
+    static_cast<TypedAttributeArray<ValueType, Codec>*>(array)->allocate();
+}
 
 
 template<typename ValueType_, typename Codec_>
@@ -1513,7 +1530,8 @@ template<typename ValueType_, typename Codec_>
 bool
 TypedAttributeArray<ValueType_, Codec_>::compact()
 {
-    if (mIsUniform)     return true;
+    if (mIsUniform)             return true;
+    if (this->dataSize() == 0)  return true;
 
     // compaction is not possible if any values are different
     const ValueType_ val = this->get(0);
@@ -1777,6 +1795,15 @@ TypedAttributeArray<ValueType_, Codec_>::readPagedBuffers(compression::PagedInpu
         return;
     }
 
+    // Dynamic arrays can have size of zero
+    if (this->dataSize() == 0) {
+        if (!is.sizeOnly()) {
+            this->deallocate();
+            this->allocate();
+        }
+        return;
+    }
+
     // If this array is being read from a memory-mapped file, delay loading of its data
     // until the data is actually accessed.
     io::MappedFile::Ptr mappedFile = io::getMappedFilePtr(is.getInputStream());
@@ -1846,9 +1873,9 @@ TypedAttributeArray<ValueType_, Codec_>::writeMetadata(std::ostream& os, bool ou
     uint8_t flags(mFlags & uint8_t(~OUTOFCORE));
 #endif
     uint8_t serializationFlags(0);
-    Index size(mSize);
-    Index stride(mStrideOrTotalSize);
-    bool strideOfOne(this->stride() == 1);
+    Index size(this->dataSize());
+    Index stride(this->stride());
+    bool strideOfOne(stride == 1);
 
     bool bloscCompression = io::getDataCompression(os) & io::COMPRESS_BLOSC;
 
@@ -1857,7 +1884,7 @@ TypedAttributeArray<ValueType_, Codec_>::writeMetadata(std::ostream& os, bool ou
 
     size_t compressedBytes = 0;
 
-    if (!strideOfOne)
+    if (stride > 1)
     {
         serializationFlags |= WRITESTRIDED;
     }
@@ -1889,7 +1916,7 @@ TypedAttributeArray<ValueType_, Codec_>::writeMetadata(std::ostream& os, bool ou
     os.write(reinterpret_cast<const char*>(&size), sizeof(Index));
 
     // write strided
-    if (!strideOfOne)       os.write(reinterpret_cast<const char*>(&stride), sizeof(Index));
+    if (stride > 1)       os.write(reinterpret_cast<const char*>(&stride), sizeof(Index));
 }
 
 
@@ -1954,6 +1981,8 @@ TypedAttributeArray<ValueType_, Codec_>::writePagedBuffers(compression::PagedOut
 
     this->doLoad();
 
+    if (this->dataSize() == 0)  return;
+
     os.write(reinterpret_cast<const char*>(this->data()), this->arrayMemUsage());
 }
 
@@ -1998,7 +2027,8 @@ TypedAttributeArray<ValueType_, Codec_>::getAccessor() const
         &TypedAttributeArray<ValueType_, Codec_>::getUnsafe,
         &TypedAttributeArray<ValueType_, Codec_>::setUnsafe,
         &TypedAttributeArray<ValueType_, Codec_>::collapse,
-        &TypedAttributeArray<ValueType_, Codec_>::fill));
+        &TypedAttributeArray<ValueType_, Codec_>::fill,
+        &TypedAttributeArray<ValueType_, Codec_>::resize));
 }
 
 
@@ -2101,7 +2131,7 @@ AttributeHandle<ValueType, CodecType>::create(const AttributeArray& array, const
 template <typename ValueType, typename CodecType>
 AttributeHandle<ValueType, CodecType>::AttributeHandle(const AttributeArray& array, const bool collapseOnDestruction)
     : mArray(&array)
-    , mStrideOrTotalSize(array.hasConstantStride() ? array.stride() : 1)
+    , mStride(array.stride())
     , mSize(array.hasConstantStride() ? array.size() : array.dataSize())
     , mCollapseOnDestruction(collapseOnDestruction && array.isStreaming())
 {
@@ -2124,6 +2154,7 @@ AttributeHandle<ValueType, CodecType>::AttributeHandle(const AttributeArray& arr
     mSetter = typedAccessor->mSetter;
     mCollapser = typedAccessor->mCollapser;
     mFiller = typedAccessor->mFiller;
+    mResizer = typedAccessor->mResizer;
 }
 
 template <typename ValueType, typename CodecType>
@@ -2163,9 +2194,16 @@ const AttributeArray& AttributeHandle<ValueType, CodecType>::array() const
 template <typename ValueType, typename CodecType>
 Index AttributeHandle<ValueType, CodecType>::index(Index n, Index m) const
 {
-    Index index = n * mStrideOrTotalSize + m;
-    assert(index < (mSize * mStrideOrTotalSize));
+    Index index = n * mStride + m;
+    assert(index < mSize * mStride);
     return index;
+}
+
+template <typename ValueType, typename CodecType>
+void AttributeHandle<ValueType, CodecType>::resetSize()
+{
+    assert(!this->hasConstantStride());
+    mSize = this->mArray->dataSize();
 }
 
 template <typename ValueType, typename CodecType>
@@ -2223,6 +2261,13 @@ AttributeWriteHandle<ValueType, CodecType>::AttributeWriteHandle(AttributeArray&
     : AttributeHandle<ValueType, CodecType>(array, /*collapseOnDestruction=*/false)
 {
     if (expand)     array.expand();
+}
+
+template <typename ValueType, typename CodecType>
+void AttributeWriteHandle<ValueType, CodecType>::resize(const size_t newSize)
+{
+    this->mResizer(const_cast<AttributeArray*>(this->mArray), newSize);
+    if (!this->hasConstantStride())   this->resetSize();
 }
 
 template <typename ValueType, typename CodecType>
