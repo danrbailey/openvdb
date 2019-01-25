@@ -99,20 +99,10 @@ NO_BLOSC_ARGS="         BLOSC_INCL_DIR=\
 HOUDINI_HAS_BOOST=$(echo "$HOUDINI_MAJOR < 16.5" | bc -l)
 
 CLANG_WARNINGS="    -Qunused-arguments\
-                    -Weverything\
-                    -Wc++0x-compat\
-                    -Wno-c++98-compat-pedantic\
-                    -Wno-covered-switch-default\
-                    -Wno-documentation\
-                    -Wno-documentation-deprecated-sync\
-                    -Wno-documentation-unknown-command\
-                    -Wno-double-promotion\
-                    -Wno-exit-time-destructors\
-                    -Wno-global-constructors\
-                    -Wno-mismatched-tags\
-                    -Wno-padded\
-                    -Wno-sign-conversion\
-                    -Wno-weak-vtables"
+                    -Wall\
+                    -Wextra\
+                    -Wconversion\
+                    -Wno-sign-conversion"
 
 GCC_WARNINGS="      -Wall
                     -Wextra\
