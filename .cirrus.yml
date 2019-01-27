@@ -1,0 +1,17 @@
+# Cirrus yaml script to configure continous integration
+#
+# Author: Dan Bailey
+
+# Global default configuration
+container:
+  image: node:latest
+
+doxygen_task:
+  test_script:
+    - set +e
+    - apt-get update
+    - apt-get install doxygen -y
+    - cd openvdb
+    - make doc 2>&1 | tee ./doxygen.log
+    - grep "warning:" ./doxygen.log
+    - test $? -eq 1
