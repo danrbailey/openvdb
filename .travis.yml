@@ -79,3 +79,7 @@ install: bash travis/travis.run install $ABI $BLOSC $MODE $HOUDINI_MAJOR $COMPIL
 # Build OpenVDB and OpenVDB Houdini and run unit tests
 # (build will fail if this stage does not succeed)
 script: bash travis/travis.run script $ABI $BLOSC $MODE $HOUDINI_MAJOR $COMPILER
+
+# Upload code coverage
+after_success:
+  - bash <(curl -s https://codecov.io/bash) -x $HOME/llvm-gcov

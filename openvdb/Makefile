@@ -61,6 +61,7 @@
 #   shared=no           link executables against static OpenVDB libraries
 #                       (default: link against shared libraries)
 #   debug=yes           build with debugging symbols and without optimization
+#   coverage=yes        build with code coverage enabled
 #   verbose=yes         run commands (e.g., doxygen) in verbose mode
 #   strict=yes          Enable a collection of pre defined compiler warnings
 #                       for GCC and clang
@@ -306,6 +307,10 @@ ifeq (yes,$(strip $(strict)))
             -Woverloaded-virtual \
         #
     endif
+endif
+
+ifeq (yes,$(strip $(coverage)))
+    CXXFLAGS += -fprofile-arcs -ftest-coverage
 endif
 
 LIBS := \

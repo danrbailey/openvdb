@@ -112,6 +112,10 @@ if [ "$TASK" = "install" ]; then
         echo 'ccache g++ $*' >> $HOME/ccache_compiler
     fi
     chmod 755 $HOME/ccache_compiler
+    # introduce wrapper to gcov to use llvm-cov
+    echo '#!/bin/bash' > $HOME/llvm-gcov
+    echo 'llvm-cov gcov "$@"' >> $HOME/llvm-gcov
+    chmod 755 $HOME/llvm-gcov
     # update OS
     sudo apt-get update
     # sym-link to reduce command word lengths
