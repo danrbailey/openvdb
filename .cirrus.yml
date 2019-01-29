@@ -9,11 +9,13 @@ container:
 # Search the git repository for any trailing spaces
 trailing_spaces_task:
   test_script:
+    - set +e
     - git grep -n -I -E '^.+[ ]+$'
     - test $? -eq 1
 
 # Search the C++ source code for any tabs
 spaces_not_tabs_task:
   test_script:
+    - set +e
     - git grep -n "	" -- '*.cc' '*.h'
     - test $? -eq 1
