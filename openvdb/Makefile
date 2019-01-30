@@ -927,7 +927,7 @@ vdb_test: $(LIBOPENVDB) $(UNITTEST_OBJ_NAMES)
 
 test: lib vdb_test
 	@echo "Testing $(LIBOPENVDB_NAME)"
-	export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(CURDIR); ./vdb_test $(QUIET_TEST)
+	export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(CURDIR); ./vdb_test -v
 else
 vdb_test:
 	@echo "$@"': $$(CPPUNIT_INCL_DIR) is undefined'
