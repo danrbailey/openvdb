@@ -195,10 +195,10 @@ elif [ "$TASK" = "script" ]; then
                     make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS vdb_view abi="$ABI" -j2
                     make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS python abi="$ABI" -j2
                 fi
-                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS install abi="$ABI" -j4
+                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS install_lib abi="$ABI" coverage=yes -j4
                 # run C++ and Python unit tests
-                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS test abi="$ABI" -j4
-                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS pytest abi="$ABI" -j4
+                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS test abi="$ABI" coverage=yes -j4
+                # make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS pytest abi="$ABI" -j4
             elif [ "$MODE" = "header" ]; then
                 # check for any indirect includes
                 make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $STANDALONE_BLOSC_ARGS header_test abi="$ABI" -j4
@@ -209,10 +209,10 @@ elif [ "$TASK" = "script" ]; then
         else
             if [ "$MODE" = "release" ]; then
                 # build OpenVDB core library, OpenVDB Python module and all binaries
-                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS install abi="$ABI" -j4
+                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS install_lib abi="$ABI" coverage=yes -j4
                 # run C++ and Python unit tests
-                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS test abi="$ABI" -j4
-                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS pytest abi="$ABI" -j4
+                make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS test abi="$ABI" coverage=yes -j4
+                # make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS pytest abi="$ABI" -j4
             else
                 # build OpenVDB core library, OpenVDB Python module and all binaries
                 make -C openvdb $COMMON_ARGS $STANDALONE_ARGS $NO_BLOSC_ARGS install abi="$ABI" debug=yes -j4
