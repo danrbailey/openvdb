@@ -5,6 +5,11 @@ coverage:
   precision: 1
 
   ignore:
+    - openvdb/cmd
+    - openvdb/doc
+    - openvdb/python
+    - openvdb/unittest
+    - openvdb/viewer
     - cmd
     - doc
     - python
