@@ -575,29 +575,29 @@ UNITTEST_SRC_NAMES := \
     unittest/TestPoissonSolver.cc \
     unittest/TestPotentialFlow.cc \
     unittest/TestPrePostAPI.cc \
-    unittest/TestQuadraticInterp.cc \
-    unittest/TestQuantizedUnitVec.cc \
-    unittest/TestQuat.cc \
-    unittest/TestRay.cc \
-    unittest/TestStats.cc \
-    unittest/TestStream.cc \
-    unittest/TestStreamCompression.cc \
-    unittest/TestStringMetadata.cc \
-    unittest/TestTools.cc \
-    unittest/TestTopologyToLevelSet.cc \
-    unittest/TestTransform.cc \
-    unittest/TestTree.cc \
-    unittest/TestTreeCombine.cc \
-    unittest/TestTreeGetSetValues.cc \
-    unittest/TestTreeIterators.cc \
-    unittest/TestTreeVisitor.cc \
-    unittest/TestUtil.cc \
-    unittest/TestValueAccessor.cc \
-    unittest/TestVec2Metadata.cc \
-    unittest/TestVec3Metadata.cc \
-    unittest/TestVolumeRayIntersector.cc \
-    unittest/TestVolumeToMesh.cc \
-    unittest/TestVolumeToSpheres.cc \
+    # unittest/TestQuadraticInterp.cc \
+    # unittest/TestQuantizedUnitVec.cc \
+    # unittest/TestQuat.cc \
+    # unittest/TestRay.cc \
+    # unittest/TestStats.cc \
+    # unittest/TestStream.cc \
+    # unittest/TestStreamCompression.cc \
+    # unittest/TestStringMetadata.cc \
+    # unittest/TestTools.cc \
+    # unittest/TestTopologyToLevelSet.cc \
+    # unittest/TestTransform.cc \
+    # unittest/TestTree.cc \
+    # unittest/TestTreeCombine.cc \
+    # unittest/TestTreeGetSetValues.cc \
+    # unittest/TestTreeIterators.cc \
+    # unittest/TestTreeVisitor.cc \
+    # unittest/TestUtil.cc \
+    # unittest/TestValueAccessor.cc \
+    # unittest/TestVec2Metadata.cc \
+    # unittest/TestVec3Metadata.cc \
+    # unittest/TestVolumeRayIntersector.cc \
+    # unittest/TestVolumeToMesh.cc \
+    # unittest/TestVolumeToSpheres.cc \
 #
 
 DOC_FILES := doc/doc.txt doc/faq.txt doc/changes.txt doc/codingstyle.txt doc/examplecode.txt doc/api_0_98_0.txt doc/math.txt doc/points.txt doc/python.txt
