@@ -549,38 +549,38 @@ UNITTEST_SRC_NAMES := \
     unittest/TestMeanCurvature.cc \
     unittest/TestMeshToVolume.cc \
     unittest/TestMetadata.cc \
-    # unittest/TestMetadataIO.cc \
-    # unittest/TestMetaMap.cc \
-    # unittest/TestMultiResGrid.cc \
-    # unittest/TestName.cc \
-    # unittest/TestNodeIterator.cc \
-    # unittest/TestNodeManager.cc \
-    # unittest/TestNodeMask.cc \
-    # unittest/TestParticleAtlas.cc \
-    # unittest/TestParticlesToLevelSet.cc \
-    # unittest/TestPointAdvect.cc \
-    # unittest/TestPointAttribute.cc \
-    # unittest/TestPointConversion.cc \
-    # unittest/TestPointCount.cc \
-    # unittest/TestPointDataLeaf.cc \
-    # unittest/TestPointDelete.cc \
-    # unittest/TestPointGroup.cc \
-    # unittest/TestPointIndexGrid.cc \
-    # unittest/TestPointMask.cc \
-    # unittest/TestPointMove.cc \
-    # unittest/TestPointPartitioner.cc \
-    # unittest/TestPointSample.cc \
-    # unittest/TestPointScatter.cc \
-    # unittest/TestPointsToMask.cc \
-    # unittest/TestPoissonSolver.cc \
-    # unittest/TestPotentialFlow.cc \
-    # unittest/TestPrePostAPI.cc \
-    # unittest/TestQuadraticInterp.cc \
-    # unittest/TestQuantizedUnitVec.cc \
-    # unittest/TestQuat.cc \
-    # unittest/TestRay.cc \
-    # unittest/TestStats.cc \
-    # unittest/TestStream.cc \
+    unittest/TestMetadataIO.cc \
+    unittest/TestMetaMap.cc \
+    unittest/TestMultiResGrid.cc \
+    unittest/TestName.cc \
+    unittest/TestNodeIterator.cc \
+    unittest/TestNodeManager.cc \
+    unittest/TestNodeMask.cc \
+    unittest/TestParticleAtlas.cc \
+    unittest/TestParticlesToLevelSet.cc \
+    unittest/TestPointAdvect.cc \
+    unittest/TestPointAttribute.cc \
+    unittest/TestPointConversion.cc \
+    unittest/TestPointCount.cc \
+    unittest/TestPointDataLeaf.cc \
+    unittest/TestPointDelete.cc \
+    unittest/TestPointGroup.cc \
+    unittest/TestPointIndexGrid.cc \
+    unittest/TestPointMask.cc \
+    unittest/TestPointMove.cc \
+    unittest/TestPointPartitioner.cc \
+    unittest/TestPointSample.cc \
+    unittest/TestPointScatter.cc \
+    unittest/TestPointsToMask.cc \
+    unittest/TestPoissonSolver.cc \
+    unittest/TestPotentialFlow.cc \
+    unittest/TestPrePostAPI.cc \
+    unittest/TestQuadraticInterp.cc \
+    unittest/TestQuantizedUnitVec.cc \
+    unittest/TestQuat.cc \
+    unittest/TestRay.cc \
+    unittest/TestStats.cc \
+    unittest/TestStream.cc \
     # unittest/TestStreamCompression.cc \
     # unittest/TestStringMetadata.cc \
     # unittest/TestTools.cc \
