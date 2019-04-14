@@ -151,110 +151,499 @@ jobs:
       - run: *build_abi6
       - run: *test
 
-  # testblosc151:
-  #   <<: *defaults
-  #   steps:
-  #     - checkout
-  #     - run: *install
-  #     - run: *install_cmake3_11
-  #     - run: *install_boost1_66
-  #     - run: *install_tbb2018
-  #     - run: *install_openexr2_3
-  #     - run: bash ci/install_blosc.sh 1.5.1
-  #     - run: *build_abi6
-  #     - run: *test
+  testblosc151:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.5.1
+      - run: *build_abi6
+      - run: *test
 
-  # testblosc152:
-  #   <<: *defaults
-  #   steps:
-  #     - checkout
-  #     - run: *install
-  #     - run: *install_cmake3_11
-  #     - run: *install_boost1_66
-  #     - run: *install_tbb2018
-  #     - run: *install_openexr2_3
-  #     - run: bash ci/install_blosc.sh 1.5.2
-  #     - run: *build_abi6
-  #     - run: *test
+  testblosc152:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.5.2
+      - run: *build_abi6
+      - run: *test
 
-  # testblosc153:
-  #   <<: *defaults
-  #   steps:
-  #     - checkout
-  #     - run: *install
-  #     - run: *install_cmake3_11
-  #     - run: *install_boost1_66
-  #     - run: *install_tbb2018
-  #     - run: *install_openexr2_3
-  #     - run: bash ci/install_blosc.sh 1.5.3
-  #     - run: *build_abi6
-  #     - run: *test
+  testblosc153:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.5.3
+      - run: *build_abi6
+      - run: *test
 
-  # testblosc154:
-  #   <<: *defaults
-  #   steps:
-  #     - checkout
-  #     - run: *install
-  #     - run: *install_cmake3_11
-  #     - run: *install_boost1_66
-  #     - run: *install_tbb2018
-  #     - run: *install_openexr2_3
-  #     - run: bash ci/install_blosc.sh 1.5.4
-  #     - run: *build_abi6
-  #     - run: *test
+  testblosc154:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.5.4
+      - run: *build_abi6
+      - run: *test
 
-  # testblosc160:
-  #   <<: *defaults
-  #   steps:
-  #     - checkout
-  #     - run: *install
-  #     - run: *install_cmake3_11
-  #     - run: *install_boost1_66
-  #     - run: *install_tbb2018
-  #     - run: *install_openexr2_3
-  #     - run: bash ci/install_blosc.sh 1.6.0
-  #     - run: *build_abi6
-  #     - run: *test
+  testblosc160:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.6.0
+      - run: *build_abi6
+      - run: *test
 
-# v1.5.0
-# v1.5.1
-# v1.5.2
-# v1.5.3
-# v1.5.4
-# v1.6.0
-# v1.6.1
-# v1.7.0
-# v1.7.1
-# v1.8.0
-# v1.8.1
-# v1.9.0
-# v1.10.0
-# v1.10.1
-# v1.10.2
-# v1.11.0
-# v1.11.1
-# v1.11.2
-# v1.11.3
-# v1.12.0
-# v1.12.1
-# v1.13.0
-# v1.13.1
-# v1.13.2
-# v1.13.3
-# v1.13.4
-# v1.13.5
-# v1.13.6
-# v1.13.7
-# v1.14.0
-# v1.14.1
-# v1.14.2
-# v1.14.3
-# v1.14.4
-# v1.15.0
-# v1.16.0
-# v1.16.1
-# v1.16.2
-# v1.16.3
+  testblosc161:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.6.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc170:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.7.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc171:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.7.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc180:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.8.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc181:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.8.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc190:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.9.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1100:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.10.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1101:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.10.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1102:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.10.2
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1110:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.11.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1111:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.11.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1112:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.11.2
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1113:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.11.3
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1120:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.12.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1121:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.12.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1130:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1131:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1132:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.2
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1133:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.3
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1134:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.4
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1135:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.5
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1136:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.6
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1137:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.13.7
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1140:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.14.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1141:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.14.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1142:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.14.2
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1143:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.14.3
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1144:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.14.4
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1150:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.15.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1160:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.16.0
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1161:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.16.1
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1162:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.16.2
+      - run: *build_abi6
+      - run: *test
+
+  testblosc1163:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: *install
+      - run: *install_cmake3_11
+      - run: *install_boost1_66
+      - run: *install_tbb2018
+      - run: *install_openexr2_3
+      - run: bash ci/install_blosc.sh 1.16.3
+      - run: *build_abi6
+      - run: *test
 
 # Workflows
 
@@ -263,9 +652,42 @@ workflows:
     jobs:
       - testblosclatest
       - testblosc150
-      # - testblosc151
-      # - testblosc152
-      # - testblosc153
-      # - testblosc154
-      # - testblosc160
-      
+      - testblosc151
+      - testblosc152
+      - testblosc153
+      - testblosc154
+      - testblosc160
+      - testblosc161
+      - testblosc170
+      - testblosc171
+      - testblosc180
+      - testblosc181
+      - testblosc190
+      - testblosc1100
+      - testblosc1101
+      - testblosc1102
+      - testblosc1110
+      - testblosc1111
+      - testblosc1112
+      - testblosc1113
+      - testblosc1120
+      - testblosc1121
+      - testblosc1130
+      - testblosc1131
+      - testblosc1132
+      - testblosc1133
+      - testblosc1134
+      - testblosc1135
+      - testblosc1136
+      - testblosc1137
+      - testblosc1140
+      - testblosc1141
+      - testblosc1142
+      - testblosc1143
+      - testblosc1144
+      - testblosc1150
+      - testblosc1160
+      - testblosc1161
+      - testblosc1162
+      - testblosc1163
+
