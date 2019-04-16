@@ -9,7 +9,7 @@ environment:
 
 os: Visual Studio 2017
 
-cache: c:\tools\vcpkg\installed\
+# cache: c:\tools\vcpkg\installed\
 
 before_build:
   - cd C:\tools\vcpkg
