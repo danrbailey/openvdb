@@ -2,24 +2,24 @@
 
 set -ex
 
-apt-get update
+sudo apt-get update
 
-apt-get install -y zlib1g-dev
-apt-get install -y wget
-apt-get install -y unzip
-apt-get install -y curl
-apt-get install -y cmake
-apt-get install -y git
-apt-get install -y g++
-apt-get install -y clang
-apt-get install -y llvm
-apt-get install -y pkg-config
-apt-get install -y libglu1-mesa-dev
-apt-get install -y libgl1-mesa-dev
-apt-get install -y libcppunit-dev
-apt-get install -y liblog4cplus-dev
-apt-get install -y libglfw3-dev
-apt-get install -y python-dev
-apt-get install -y python-numpy
-apt-get install -y python-epydoc
-apt-get install -y doxygen
+sudo apt-get install -y zlib1g-dev
+sudo apt-get install -y wget
+sudo apt-get install -y unzip
+sudo apt-get install -y curl
+sudo apt-get install -y cmake
+sudo apt-get install -y git
+sudo apt-get install -y g++
+sudo apt-get install -y clang
+sudo apt-get install -y llvm
+sudo apt-get install -y pkg-config
+sudo apt-get install -y libglu1-mesa-dev
+sudo apt-get install -y libgl1-mesa-dev
+sudo apt-get install -y libcppunit-dev
+sudo apt-get install -y liblog4cplus-dev
+sudo apt-get install -y libglfw3-dev
+sudo apt-get install -y python-dev
+sudo apt-get install -y python-numpy
+sudo apt-get install -y python-epydoc
+sudo apt-get install -y doxygen

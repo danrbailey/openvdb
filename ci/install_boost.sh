@@ -5,7 +5,7 @@ set -ex
 BOOST_VERSION="$1"
 
 # only install for Boost 1.61
-apt-get install -y libbz2-dev
+sudo apt-get install -y libbz2-dev
 
 git clone https://github.com/boostorg/boost.git
 cd boost
