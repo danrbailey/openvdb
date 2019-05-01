@@ -12,6 +12,6 @@ if [ "$TBB_VERSION" != "latest" ]; then
 fi
 
 make -j4
-cp -r include/serial /usr/local/include/.
-cp -r include/tbb /usr/local/include/.
-cp -r build/*/*.so* /usr/local/lib/.
+sudo cp -r include/serial /usr/local/include/.
+sudo cp -r include/tbb /usr/local/include/.
+sudo cp -r build/*/*.so* /usr/local/lib/.

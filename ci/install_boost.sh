@@ -19,8 +19,8 @@ fi
 git submodule update --init --
 
 ./bootstrap.sh --prefix=/usr/local
-./b2 headers -j4
-./b2 install link=shared variant=release \
+sudo ./b2 headers -j4
+sudo ./b2 install link=shared variant=release \
     --with-atomic \
     --with-chrono \
     --with-date_time \

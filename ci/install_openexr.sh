@@ -17,4 +17,4 @@ mkdir build
 cd build
 cmake -DOPENEXR_BUILD_PYTHON_LIBS=OFF -DOPENEXR_BUILD_TESTS=OFF -DOPENEXR_BUILD_UTILS=OFF ../.
 make -j4
-make install
+sudo make install
