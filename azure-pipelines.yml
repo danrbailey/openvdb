@@ -15,5 +15,5 @@ stages:
     - bash: ci/install_tbb.sh 2018
     - bash: ci/install_openexr.sh 2.3.0
     - bash: ci/install_blosc.sh 1.5.0
-    - bash: ci/build.sh clang++ Release 6 ON
+    - bash: ci/build.sh g++ Release 6 ON
     - bash: ./build/openvdb/unittest/vdb_test -v
