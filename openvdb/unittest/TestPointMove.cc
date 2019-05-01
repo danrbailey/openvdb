@@ -1098,7 +1098,7 @@ TestPointMove::testPointData()
         appendGroup(points->tree(), "odd");
 
         std::vector<short> oddGroups(newPositions.size(), 0);
-        for (int i = 1; i < newPositions.size(); i += 2) {
+        for (size_t i = 1; i < newPositions.size(); i += 2) {
             oddGroups[i] = 1;
         }
 
