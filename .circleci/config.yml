@@ -258,8 +258,8 @@ jobs:
 workflows:
   build_and_test:
     jobs:
-      - testabi6
-      - testabi5
+      # - testabi6
+      # - testabi5
       - testabi4
       # - testabi6debug
       # - testabi6gcc
