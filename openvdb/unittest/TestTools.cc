@@ -168,6 +168,8 @@ private:
 void
 TestTools::testDilateVoxels()
 {
+    std::cerr << "A" << std::endl;
+
     using openvdb::CoordBBox;
     using openvdb::Coord;
     using openvdb::Index32;
@@ -175,12 +177,18 @@ TestTools::testDilateVoxels()
 
     using Tree543f = openvdb::tree::Tree4<float, 5, 4, 3>::Type;
 
+    std::cerr << "B" << std::endl;
+
     Tree543f::Ptr tree(new Tree543f);
     openvdb::tools::changeBackground(*tree, /*background=*/5.0);
     CPPUNIT_ASSERT(tree->empty());
 
+    std::cerr << "C" << std::endl;
+
     const openvdb::Index leafDim = Tree543f::LeafNodeType::DIM;
     CPPUNIT_ASSERT_EQUAL(1 << 3, int(leafDim));
+
+    std::cerr << "D" << std::endl;
 
     {
         // Set and dilate a single voxel at the center of a leaf node.
@@ -190,6 +198,9 @@ TestTools::testDilateVoxels()
         openvdb::tools::dilateVoxels(*tree);
         CPPUNIT_ASSERT_EQUAL(Index64(7), tree->activeVoxelCount());
     }
+
+    std::cerr << "E" << std::endl;
+
     {
         // Create an active, leaf node-sized tile.
         tree->clear();
@@ -210,6 +221,9 @@ TestTools::testDilateVoxels()
                              tree->activeVoxelCount());
         CPPUNIT_ASSERT_EQUAL(Index64(1), tree->activeTileCount());
     }
+
+    std::cerr << "F" << std::endl;
+
     {
         // Set and dilate a single voxel at each of the eight corners of a leaf node.
         for (int i = 0; i < 8; ++i) {
@@ -226,6 +240,9 @@ TestTools::testDilateVoxels()
             CPPUNIT_ASSERT_EQUAL(Index64(7), tree->activeVoxelCount());
         }
     }
+
+    std::cerr << "G" << std::endl;
+
     {
         tree->clear();
         tree->setValue(Coord(0), 1.0);
@@ -235,6 +252,9 @@ TestTools::testDilateVoxels()
         openvdb::tools::dilateVoxels(*tree);
         CPPUNIT_ASSERT_EQUAL(Index64(17), tree->activeVoxelCount());
     }
+
+    std::cerr << "H" << std::endl;
+
     {
         struct Info { int activeVoxelCount, leafCount, nonLeafCount; };
         Info iterInfo[11] = {
@@ -263,6 +283,8 @@ TestTools::testDilateVoxels()
         }
     }
 
+    std::cerr << "I" << std::endl;
+
     {// dialte a narrow band of a sphere
         using GridType = openvdb::Grid<Tree543f>;
         GridType grid(tree->background());
@@ -274,6 +296,8 @@ TestTools::testDilateVoxels()
         openvdb::tools::dilateVoxels(grid.tree());
         CPPUNIT_ASSERT(grid.tree().activeVoxelCount() > count);
     }
+
+    std::cerr << "J" << std::endl;
 
     {// dilate a fog volume of a sphere
         using GridType = openvdb::Grid<Tree543f>;
@@ -307,6 +331,8 @@ TestTools::testDilateVoxels()
 //         //    << grid->tree().activeVoxelCount() << std::endl;
 //     }
 
+    std::cerr << "K" << std::endl;
+
     {// test dilateVoxels6
         for (int x=0; x<8; ++x) {
             for (int y=0; y<8; ++y) {
@@ -339,6 +365,9 @@ TestTools::testDilateVoxels()
             }
         }
     }
+
+    std::cerr << "L" << std::endl;
+
     {// test dilateVoxels18
         for (int x=0; x<8; ++x) {
             for (int y=0; y<8; ++y) {
@@ -371,6 +400,9 @@ TestTools::testDilateVoxels()
             }
         }
     }
+
+    std::cerr << "M" << std::endl;
+
     {// test dilateVoxels26
         for (int x=0; x<8; ++x) {
             for (int y=0; y<8; ++y) {
@@ -403,6 +435,9 @@ TestTools::testDilateVoxels()
             }
         }
     }
+
+    std::cerr << "N" << std::endl;
+
     /*
     // Performance test
     {// dialte a narrow band of a sphere
