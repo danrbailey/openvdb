@@ -261,12 +261,12 @@ workflows:
       - testabi6
       - testabi5
       - testabi4
-      - testabi6debug
-      - testabi6gcc
-      - testabi6noblosc
-      - testhou175
-      - testhou170
-      - testhou165
-      - testhou175debug
-      - testhou175gcc
+      # - testabi6debug
+      # - testabi6gcc
+      # - testabi6noblosc
+      # - testhou175
+      # - testhou170
+      # - testhou165
+      # - testhou175debug
+      # - testhou175gcc
       # - testabi6latest # work-in-progress
