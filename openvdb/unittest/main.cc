@@ -200,7 +200,7 @@ run(int argc, char* argv[])
         }
     }
 
-    try {
+    // try {
         CppUnit::TestFactoryRegistry& registry =
             CppUnit::TestFactoryRegistry::getRegistry();
 
@@ -245,6 +245,8 @@ run(int argc, char* argv[])
             controller.addListener(&progress);
         }
 
+        controller.popProtector();
+
         for (size_t i = 0; i < tests.size(); ++i) {
             runner.run(controller, tests[i]);
         }
@@ -254,10 +256,10 @@ run(int argc, char* argv[])
 
         return result.wasSuccessful() ? EXIT_SUCCESS : EXIT_FAILURE;
 
-    } catch (std::exception& e) {
-        OPENVDB_LOG_FATAL(e.what());
-        return EXIT_FAILURE;
-    }
+    // } catch (std::exception& e) {
+    //     OPENVDB_LOG_FATAL(e.what());
+    //     return EXIT_FAILURE;
+    // }
 }
 
 } // anonymous namespace
