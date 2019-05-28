@@ -1,0 +1,13 @@
+trigger:
+- azure
+
+stages:
+- stage: Build
+  jobs:
+  - job: testabi6
+    pool:
+      vmImage: 'ubuntu-16.04'
+    container: openvdb/vfx2018:latest
+    steps:
+    - bash: ci/build.sh clang++ Release 6 ON
+    - bash: ./build/openvdb/unittest/vdb_test -v
