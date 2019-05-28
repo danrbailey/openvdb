@@ -21,4 +21,3 @@ cmake \
     -DOPENVDB_BUILD_VDB_VIEW=ON \
     ..
 make -j2
-make install

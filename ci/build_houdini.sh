@@ -6,7 +6,7 @@ COMPILER="$1"
 RELEASE="$2"
 EXTRAS="$3"
 
-cd hou
+cd /opt/hou
 source houdini_setup_bash
 cd -
 
@@ -28,4 +28,3 @@ if [ "$COMPILER" = "clang++" ]; then
 else
     make
 fi
-make install

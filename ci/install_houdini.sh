@@ -14,9 +14,11 @@ export PYTHONPATH=${PYTHONPATH}:/usr/lib/python2.7/dist-packages
 # download and unpack latest houdini headers and libraries from daily-builds
 python ci/download_houdini.py $HOUDINI_MAJOR
 
+mv hou.tar.gz /opt/hou.tar.gz
+cd /opt
 tar -xzf hou.tar.gz
 ln -s houdini* hou
-cd hou
+cd -
+cd /opt/hou
 tar -xzf houdini.tar.gz
-
 cd -
