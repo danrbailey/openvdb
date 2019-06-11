@@ -1,95 +1,17 @@
 
+resources:
+  containers:
+  - container: houtest
+    image: danrbailey/openvdb-houdini:latest
+    endpoint: danrbailey_docker
+
 stages:
 - stage: Build
   jobs:
-  - job: testabi6
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build.sh clang++ Release 6 ON
-    - bash: ./build/openvdb/unittest/vdb_test -v
-
-  - job: testabi5
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2017:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build.sh clang++ Release 5 ON
-    - bash: ./build/openvdb/unittest/vdb_test -v
-
-  - job: testabi4
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2016:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build.sh clang++ Release 4 ON
-    - bash: ./build/openvdb/unittest/vdb_test -v
-
   - job: testhou175
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini175:latest
+    container: houtest
     timeoutInMinutes: 0
     steps:
     - bash: ci/build_houdini.sh clang++ Release ON
-
-  - job: testhou170
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini170:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build_houdini.sh clang++ Release OFF
-
-  - job: testhou165
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini165:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build_houdini.sh clang++ Release OFF
-
-  - job: testabi6noblosc
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build.sh clang++ Release 6 OFF
-    - bash: ./build/openvdb/unittest/vdb_test -v
-
-  - job: testhou175gcc
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini175:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build_houdini.sh g++ Release OFF
-
-  - job: testhou175debug
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini175:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build_houdini.sh clang++ Debug OFF
-
-  - job: testabi6gcc
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build.sh g++ Release 6 ON
-
-  - job: testabi6debug
-    pool:
-      vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
-    timeoutInMinutes: 0
-    steps:
-    - bash: ci/build.sh clang++ Debug 6 ON
