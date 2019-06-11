@@ -1,11 +1,23 @@
 
+resources:
+  containers:
+  - container: vfx2019
+    image: openvdb/vfx2019:latest
+  - container: vfx2018
+    image: openvdb/vfx2018:latest
+  - container: vfx2017
+    image: openvdb/vfx2017:latest
+  - container: houdini
+    image: danrbailey/openvdb-houdini:latest
+    endpoint: danrbailey_docker # private repo to store Houdini installs
+
 stages:
 - stage: Build
   jobs:
   - job: testabi6
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
+    container: vfx2019
     timeoutInMinutes: 0
     steps:
     - bash: ci/build.sh clang++ Release 6 ON
@@ -14,7 +26,7 @@ stages:
   - job: testabi5
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2017:latest
+    container: vfx2018
     timeoutInMinutes: 0
     steps:
     - bash: ci/build.sh clang++ Release 5 ON
@@ -23,7 +35,7 @@ stages:
   - job: testabi4
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2016:latest
+    container: vfx2017
     timeoutInMinutes: 0
     steps:
     - bash: ci/build.sh clang++ Release 4 ON
@@ -32,31 +44,31 @@ stages:
   - job: testhou175
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini175:latest
+    container: houdini
     timeoutInMinutes: 0
     steps:
-    - bash: ci/build_houdini.sh clang++ Release ON
+    - bash: ci/build_houdini.sh 17.5 clang++ Release ON
 
   - job: testhou170
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini170:latest
+    container: houdini
     timeoutInMinutes: 0
     steps:
-    - bash: ci/build_houdini.sh clang++ Release OFF
+    - bash: ci/build_houdini.sh 17.0 clang++ Release OFF
 
   - job: testhou165
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini165:latest
+    container: houdini
     timeoutInMinutes: 0
     steps:
-    - bash: ci/build_houdini.sh clang++ Release OFF
+    - bash: ci/build_houdini.sh 16.5 clang++ Release OFF
 
   - job: testabi6noblosc
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
+    container: vfx2019
     timeoutInMinutes: 0
     steps:
     - bash: ci/build.sh clang++ Release 6 OFF
@@ -65,23 +77,23 @@ stages:
   - job: testhou175gcc
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini175:latest
+    container: houdini
     timeoutInMinutes: 0
     steps:
-    - bash: ci/build_houdini.sh g++ Release OFF
+    - bash: ci/build_houdini.sh 17.5 g++ Release OFF
 
   - job: testhou175debug
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/houdini175:latest
+    container: houdini
     timeoutInMinutes: 0
     steps:
-    - bash: ci/build_houdini.sh clang++ Debug OFF
+    - bash: ci/build_houdini.sh 17.5 clang++ Debug OFF
 
   - job: testabi6gcc
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
+    container: vfx2019
     timeoutInMinutes: 0
     steps:
     - bash: ci/build.sh g++ Release 6 ON
@@ -89,7 +101,7 @@ stages:
   - job: testabi6debug
     pool:
       vmImage: 'ubuntu-16.04'
-    container: openvdb/vfx2018:latest
+    container: vfx2019
     timeoutInMinutes: 0
     steps:
     - bash: ci/build.sh clang++ Debug 6 ON

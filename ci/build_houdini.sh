@@ -2,11 +2,12 @@
 
 set -ex
 
-COMPILER="$1"
-RELEASE="$2"
-EXTRAS="$3"
+VERSION="$1"
+COMPILER="$2"
+RELEASE="$3"
+EXTRAS="$4"
 
-cd /opt/hou
+cd /opt/hou${VERSION}
 source houdini_setup_bash
 cd -
 
