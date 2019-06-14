@@ -21,6 +21,7 @@ cmake \
     -DOPENVDB_BUILD_BINARIES=${EXTRAS} \
     -DOPENVDB_BUILD_PYTHON_MODULE=${EXTRAS} \
     -DOPENVDB_BUILD_UNITTESTS=${EXTRAS} \
+    -DOPENVDB_BUILD_VDB_VIEW=OFF \
      ..
 
 # Can only build using one thread with GCC due to memory constraints
