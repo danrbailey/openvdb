@@ -496,6 +496,10 @@ public:
     /// @throw std::invalid_argument if @a allocator is empty
     OpFactory& setVerb(SOP_NodeVerb::CookMode cookMode, const CacheAllocFunc& allocator);
 
+    /// @brief Set the default shape of the operator in the Houdini network editor.
+    /// @details An empty string will disable, reverting to the usual rules.
+    OpFactory& setDefaultShape(const std::string& name);
+
     /// @brief Mark this node as hidden from the UI tab menu.
     /// @details This is equivalent to using the hscript ophide method.
     OpFactory& setInvisible();

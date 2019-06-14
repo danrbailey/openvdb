@@ -1064,6 +1064,7 @@ struct OpFactory::Impl
     std::vector<std::string> mAliases;
     std::vector<char*> mInputLabels, mOptInputLabels;
     OpFactoryVerb* mVerb = nullptr;
+    std::string mDefaultShape;
     bool mInvisible = false;
 };
 
@@ -1090,6 +1091,12 @@ OpFactory::~OpFactory()
 
     if (!mImpl->mFirstName.empty()) {
         mImpl->mTable->setOpFirstName(mImpl->mName.c_str(), mImpl->mFirstName.c_str());
+    }
+
+    // apply default node shape if set
+
+    if (!mImpl->mDefaultShape.empty()) {
+        mImpl->mTable->setOpDefaultShape(mImpl->mName, mImpl->mDefaultShape);
     }
 
     // hide node if marked as invisible
@@ -1278,6 +1285,17 @@ OpFactory::setVerb(SOP_NodeVerb::CookMode cookMode, const CacheAllocFunc& alloca
 
     mImpl->mVerb = new OpFactoryVerb{name(), cookMode, allocator, mImpl->mParms};
 
+    return *this;
+}
+
+
+OpFactory&
+OpFactory::setDefaultShape(const std::string& name)
+{
+    if (flavor() != SOP) {
+        throw std::runtime_error{"expected operator of type SOP, got " + flavorToString(flavor())};
+    }
+    mImpl->mDefaultShape = name;
     return *this;
 }
 
