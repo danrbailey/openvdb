@@ -530,6 +530,7 @@ newSopOperator(OP_OperatorTable* table)
 #endif
         .addInput("Polygons to Convert")
         .addOptionalInput("Optional Reference VDB (for transform matching)")
+        .setDefaultShape("trapezoid_up")
         .setObsoleteParms(obsoleteParms)
         .setVerb(SOP_NodeVerb::COOK_GENERATOR,
             []() { return new SOP_OpenVDB_From_Polygons::Cache; })

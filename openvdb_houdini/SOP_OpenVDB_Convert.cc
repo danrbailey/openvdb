@@ -418,6 +418,7 @@ Polygon Soup:\n\
             "to transfer attributes, sharpen features and to "
             "eliminate seams from fractured pieces.")
         .addOptionalInput("Optional VDB masks")
+        .setDefaultShape("trapezoid_up")
         .setVerb(SOP_NodeVerb::COOK_DUPLICATE, []() { return new SOP_OpenVDB_Convert::Cache; })
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
