@@ -59,6 +59,7 @@ Houdini:
   @b openvdb_houdini::OpenVDBOpFactory.
 - Added a @b houdini_utils::OpFactory::setDefaultShape() method to allow a
   default operator shape to be defined.
+- Define default node shapes to match native Houdini VDB SOPs.
 
 
 @htmlonly <a name="v6_1_0_changes"></a>@endhtmlonly

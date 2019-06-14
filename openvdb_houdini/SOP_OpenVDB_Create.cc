@@ -540,6 +540,7 @@ Other:\n\
         .setObsoleteParms(obsoleteParms)
         .addOptionalInput("Optional Input to Merge With")
         .addOptionalInput("Optional Reference VDB")
+        .setDefaultShape("cloud")
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\

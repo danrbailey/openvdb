@@ -46,6 +46,7 @@ Version 6.1.1 - In development
       @b openvdb_houdini::OpenVDBOpFactory.
     - Added a houdini_utils::OpFactory::setDefaultShape() method to allow a
       default operator shape to be defined.
+    - Define default node shapes to match native Houdini VDB SOPs.
 
 
 Version 6.1.0 - May 8, 2019
