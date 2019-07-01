@@ -278,6 +278,13 @@ endif()
 
 if(USE_HOUDINI)
   include(OpenVDBHoudiniSetup)
+
+  # Houdini 18 uses C++14 features, so increase the C++ standard version
+  if(NOT Houdini_VERSION VERSION_LESS 18)
+    message(WARNING "CMake will override C++ standard version to use C++14 as "
+      "Houdini 18.0 and above uses features only available in C++14.")
+    set(CMAKE_CXX_STANDARD 14)
+  endif()
 endif()
 
 if(USE_MAYA)
