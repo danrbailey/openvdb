@@ -116,8 +116,8 @@ inline void movePoints(PointDataGridT& points,
                        bool threaded = true);
 
 
-// define leaf index in use as 32-bit
-namespace point_move_internal { using LeafIndex = Index32; }
+// define leaf index in use as 64-bit
+namespace point_move_internal { using LeafIndex = Index64; }
 
 
 /// @brief A Deformer that caches the resulting positions from evaluating another Deformer
@@ -185,25 +185,18 @@ private:
 
 namespace point_move_internal {
 
-using IndexArray = std::vector<Index>;
-
-using IndexTriple = std::tuple<LeafIndex, Index, Index>;
-using IndexTripleArray = tbb::concurrent_vector<IndexTriple>;
-using GlobalPointIndexMap = std::vector<IndexTripleArray>;
-using GlobalPointIndexIndices = std::vector<IndexArray>;
-
-using IndexPair = std::pair<Index, Index>;
-using IndexPairArray = std::vector<IndexPair>;
-using LocalPointIndexMap = std::vector<IndexPairArray>;
-
 using LeafIndexArray = std::vector<LeafIndex>;
-using LeafOffsetArray = std::vector<LeafIndexArray>;
-using LeafMap = std::unordered_map<Coord, LeafIndex>;
+
+using GlobalIndex = std::tuple<LeafIndex, Index, Index>;
+using GlobalIndexArray = tbb::concurrent_vector<GlobalIndex>;
+
+using LocalIndex = std::pair<Index, Index>;
+using LocalIndexArray = std::vector<LocalIndex>;
 
 
 template <typename LeafT>
 inline Index
-indexOffsetFromVoxel(const Index voxelOffset, const LeafT& leaf, IndexArray& offsets)
+indexOffsetFromVoxel(const Index voxelOffset, const LeafT& leaf, LeafIndexArray& offsets)
 {
     // compute the target point index by summing the point index of the previous
     // voxel with the current number of points added to this voxel, tracked by the
@@ -222,8 +215,8 @@ indexOffsetFromVoxel(const Index voxelOffset, const LeafT& leaf, IndexArray& off
 template <typename LeafT>
 struct GlobalCopyIterator
 {
-    GlobalCopyIterator(const LeafT& leaf, const IndexArray& sortedIndices,
-        const IndexTripleArray& moveIndices, IndexArray& offsets)
+    GlobalCopyIterator(const LeafT& leaf, const LeafIndexArray& sortedIndices,
+        const GlobalIndexArray& moveIndices, LeafIndexArray& offsets)
         : mLeaf(leaf)
         , mSortedIndices(sortedIndices)
         , mMoveIndices(moveIndices)
@@ -247,7 +240,7 @@ struct GlobalCopyIterator
     Index leafIndex(Index i) const
     {
         if (i < mSortedIndices.size()) {
-            return std::get<0>(this->leafIndexTriple(i));
+            return std::get<0>(this->leafGlobalIndex(i));
         }
         return std::numeric_limits<Index>::max();
     }
@@ -271,12 +264,12 @@ private:
             mIt = nullptr;
         }
         else {
-            mIt = &this->leafIndexTriple(mIndex);
+            mIt = &this->leafGlobalIndex(mIndex);
         }
         ++mIndex;
     }
 
-    const IndexTriple& leafIndexTriple(Index i) const
+    const GlobalIndex& leafGlobalIndex(Index i) const
     {
         return mMoveIndices[mSortedIndices[i]];
     }
@@ -285,10 +278,10 @@ private:
     const LeafT& mLeaf;
     Index mIndex;
     Index mEndIndex;
-    const IndexArray& mSortedIndices;
-    const IndexTripleArray& mMoveIndices;
-    IndexArray& mOffsets;
-    const IndexTriple* mIt = nullptr;
+    const LeafIndexArray& mSortedIndices;
+    const GlobalIndexArray& mMoveIndices;
+    LeafIndexArray& mOffsets;
+    const GlobalIndex* mIt = nullptr;
 }; // struct GlobalCopyIterator
 
 
@@ -297,7 +290,7 @@ private:
 template <typename LeafT>
 struct LocalCopyIterator
 {
-    LocalCopyIterator(const LeafT& leaf, const IndexPairArray& indices, IndexArray& offsets)
+    LocalCopyIterator(const LeafT& leaf, const LocalIndexArray& indices, LeafIndexArray& offsets)
         : mLeaf(leaf)
         , mIndices(indices)
         , mOffsets(offsets) { }
@@ -318,8 +311,8 @@ struct LocalCopyIterator
 
 private:
     const LeafT& mLeaf;
-    const IndexPairArray& mIndices;
-    IndexArray& mOffsets;
+    const LocalIndexArray& mIndices;
+    LeafIndexArray& mOffsets;
     int mIndex = 0;
 }; // struct LocalCopyIterator
 
@@ -374,14 +367,14 @@ inline void movePoints( PointDataGridT& points,
     // build a coord -> index map for looking up target leafs by origin and a faster
     // unordered map for finding the source index from a target index
 
-    LeafMap targetLeafMap;
+    std::unordered_map<Coord, LeafIndex> targetLeafMap;
     LeafIndexArray sourceIndices(targetLeafManager.leafCount(),
         std::numeric_limits<LeafIndex>::max());
 
-    LeafOffsetArray offsetMap(targetLeafManager.leafCount());
+    std::vector<LeafIndexArray> offsetMap(targetLeafManager.leafCount());
 
     {
-        LeafMap sourceLeafMap;
+        std::unordered_map<Coord, LeafIndex> sourceLeafMap;
         auto sourceRange = sourceLeafManager.leafRange();
         for (auto leaf = sourceRange.begin(); leaf; ++leaf) {
             sourceLeafMap.insert({leaf->origin(), LeafIndex(static_cast<LeafIndex>(leaf.pos()))});
@@ -420,8 +413,8 @@ inline void movePoints( PointDataGridT& points,
 
     // moving leaf
 
-    GlobalPointIndexMap globalMoveLeafMap(targetLeafManager.leafCount());
-    LocalPointIndexMap localMoveLeafMap(targetLeafManager.leafCount());
+    std::vector<GlobalIndexArray> globalMoveLeafMap(targetLeafManager.leafCount());
+    std::vector<LocalIndexArray> localMoveLeafMap(targetLeafManager.leafCount());
 
     // build global and local move leaf maps and update local positions
 
@@ -456,7 +449,7 @@ inline void movePoints( PointDataGridT& points,
             localMoveLeafMap[targetLeafOffset].emplace_back(targetOffset, offset);
         }
         else {
-            globalMoveLeafMap[targetLeafOffset].push_back(IndexTriple(
+            globalMoveLeafMap[targetLeafOffset].push_back(GlobalIndex(
                 LeafIndex(static_cast<LeafIndex>(leafIndex)), targetOffset, offset));
         }
     };
@@ -495,14 +488,14 @@ inline void movePoints( PointDataGridT& points,
     // indices in order of their source leafs and voxels to ensure determinism in the
     // resulting point orders
 
-    GlobalPointIndexIndices globalMoveLeafIndices(globalMoveLeafMap.size());
+    std::vector<LeafIndexArray> globalMoveLeafIndices(globalMoveLeafMap.size());
 
     targetLeafManager.foreach(
         [&](LeafT& /*leaf*/, size_t idx) {
-            const IndexTripleArray& moveIndices = globalMoveLeafMap[idx];
+            const GlobalIndexArray& moveIndices = globalMoveLeafMap[idx];
             if (moveIndices.empty())  return;
 
-            IndexArray& sortedIndices = globalMoveLeafIndices[idx];
+            LeafIndexArray& sortedIndices = globalMoveLeafIndices[idx];
             sortedIndices.resize(moveIndices.size());
             std::iota(std::begin(sortedIndices), std::end(sortedIndices), 0);
             std::sort(std::begin(sortedIndices), std::end(sortedIndices),
@@ -534,9 +527,9 @@ inline void movePoints( PointDataGridT& points,
         targetLeafManager.foreach(
             [&](LeafT& leaf, size_t idx)
             {
-                const IndexTripleArray& moveIndices = globalMoveLeafMap[idx];
+                const GlobalIndexArray& moveIndices = globalMoveLeafMap[idx];
                 if (moveIndices.empty())  return;
-                const IndexArray& sortedIndices = globalMoveLeafIndices[idx];
+                const LeafIndexArray& sortedIndices = globalMoveLeafIndices[idx];
 
                 // extract per-voxel offsets for this leaf
 
@@ -587,7 +580,7 @@ inline void movePoints( PointDataGridT& points,
         targetLeafManager.foreach(
             [&](LeafT& leaf, size_t idx)
             {
-                const IndexPairArray& moveIndices = localMoveLeafMap[idx];
+                const LocalIndexArray& moveIndices = localMoveLeafMap[idx];
                 if (moveIndices.empty())  return;
 
                 // extract per-voxel offsets for this leaf
