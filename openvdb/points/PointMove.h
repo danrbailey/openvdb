@@ -86,17 +86,29 @@ namespace points {
 namespace future { struct Advect { }; }
 
 
+template <typename PointDataGridT, typename FilterT = NullFilter>
+struct MergePoints
+{
+    explicit MergePoints(PointDataGridT& _points)
+        : points(_points) { }
+
+    PointDataGridT& points;
+    FilterT filter = FilterT();
+    bool deform = false;
+}; // struct MergePoints
+
+
 /// @brief Move points in a PointDataGrid using a custom deformer
 /// @param points           the PointDataGrid containing the points to be moved.
 /// @param deformer         a custom deformer that defines how to move the points.
 /// @param filter           an optional index filter
 /// @param objectNotInUse   for future use, this object is currently ignored
 /// @param threaded         enable or disable threading  (threading is enabled by default)
-template <typename PointDataGridT, typename DeformerT, typename FilterT = NullFilter>
+template <typename PointDataGridT, typename DeformerT, typename FilterT = NullFilter, typename MergeFilterT = FilterT>
 inline void movePoints(PointDataGridT& points,
                        DeformerT& deformer,
                        const FilterT& filter = NullFilter(),
-                       future::Advect* objectNotInUse = nullptr,
+                       std::vector<MergePoints<PointDataGridT, MergeFilterT>>* mergePoints = nullptr,
                        bool threaded = true);
 
 
@@ -107,12 +119,12 @@ inline void movePoints(PointDataGridT& points,
 /// @param filter           an optional index filter
 /// @param objectNotInUse   for future use, this object is currently ignored
 /// @param threaded         enable or disable threading  (threading is enabled by default)
-template <typename PointDataGridT, typename DeformerT, typename FilterT = NullFilter>
+template <typename PointDataGridT, typename DeformerT, typename FilterT = NullFilter, typename MergeFilterT = FilterT>
 inline void movePoints(PointDataGridT& points,
                        const math::Transform& transform,
                        DeformerT& deformer,
                        const FilterT& filter = NullFilter(),
-                       future::Advect* objectNotInUse = nullptr,
+                       std::vector<MergePoints<PointDataGridT, MergeFilterT>>* mergePoints = nullptr,
                        bool threaded = true);
 
 
@@ -323,12 +335,12 @@ private:
 ////////////////////////////////////////
 
 
-template <typename PointDataGridT, typename DeformerT, typename FilterT>
+template <typename PointDataGridT, typename DeformerT, typename FilterT, typename MergeFilterT>
 inline void movePoints( PointDataGridT& points,
                         const math::Transform& transform,
                         DeformerT& deformer,
                         const FilterT& filter,
-                        future::Advect* objectNotInUse,
+                        std::vector<MergePoints<PointDataGridT, MergeFilterT>>* mergePoints,
                         bool threaded)
 {
     using LeafIndex = point_move_internal::LeafIndex;
@@ -337,10 +349,6 @@ inline void movePoints( PointDataGridT& points,
     using LeafManagerT = typename tree::LeafManager<PointDataTreeT>;
 
     using namespace point_move_internal;
-
-    // this object is for future use only
-    assert(!objectNotInUse);
-    (void)objectNotInUse;
 
     PointDataTreeT& tree = points.tree();
 
@@ -352,13 +360,41 @@ inline void movePoints( PointDataGridT& points,
 
     // build voxel topology taking into account any point group deletion
 
-    auto newPoints = point_mask_internal::convertPointsToScalar<PointDataGrid>(
-        points, transform, filter, deformer, threaded);
+    point_mask_internal::Pool<PointDataGrid> pool(transform);
+
+    point_mask_internal::convertPointsToScalar<PointDataGrid>(
+        pool, points, transform, filter, deformer, threaded);
+
+    // include all merge point grids in voxel data
+
+    if (mergePoints) {
+        for (const auto& merge: *mergePoints) {
+            point_mask_internal::convertPointsToScalar<PointDataGrid>(
+                pool, merge.points, transform, merge.filter, deformer, threaded);
+        }
+    }
+
+    // merge all pool grids into one
+
+    auto newPoints = pool.merge(threaded);
     auto& newTree = newPoints->tree();
 
     // create leaf managers for both trees
 
-    LeafManagerT sourceLeafManager(tree);
+    std::vector<LeafManagerT> sourceLeafManagers;
+
+    // tree::LeafManager is not currently moveable, so reserve *must* be called
+
+    sourceLeafManagers.reserve(1 + (mergePoints ? mergePoints->size() : 0));
+
+    sourceLeafManagers.emplace_back(points.tree());
+
+    if (mergePoints) {
+        for (const auto& merge: *mergePoints) {
+            sourceLeafManagers.emplace_back(merge.points.tree());
+        }
+    }
+
     LeafManagerT targetLeafManager(newTree);
 
     // extract the existing attribute set
@@ -368,16 +404,23 @@ inline void movePoints( PointDataGridT& points,
     // unordered map for finding the source index from a target index
 
     std::unordered_map<Coord, LeafIndex> targetLeafMap;
-    LeafIndexArray sourceIndices(targetLeafManager.leafCount(),
-        std::numeric_limits<LeafIndex>::max());
+    std::vector<LeafIndexArray> sourceIndicesArray(sourceLeafManagers.size());
+    for (auto& sourceIndices : sourceIndicesArray) {
+        sourceIndices.resize(targetLeafManager.leafCount(),
+            std::numeric_limits<LeafIndex>::max());
+    }
 
     std::vector<LeafIndexArray> offsetMap(targetLeafManager.leafCount());
 
     {
-        std::unordered_map<Coord, LeafIndex> sourceLeafMap;
-        auto sourceRange = sourceLeafManager.leafRange();
-        for (auto leaf = sourceRange.begin(); leaf; ++leaf) {
-            sourceLeafMap.insert({leaf->origin(), LeafIndex(static_cast<LeafIndex>(leaf.pos()))});
+        std::vector<std::unordered_map<Coord, LeafIndex>> sourceLeafMaps(sourceLeafManagers.size());
+        for (size_t i = 0; i < sourceLeafMaps.size(); i++) {
+            LeafManagerT& sourceLeafManager = sourceLeafManagers[i];
+            auto& sourceLeafMap = sourceLeafMaps[i];
+            auto sourceRange = sourceLeafManager.leafRange();
+            for (auto leaf = sourceRange.begin(); leaf; ++leaf) {
+                sourceLeafMap.insert({leaf->origin(), LeafIndex(static_cast<LeafIndex>(leaf.pos()))});
+            }
         }
         auto targetRange = targetLeafManager.leafRange();
         for (auto leaf = targetRange.begin(); leaf; ++leaf) {
@@ -400,10 +443,14 @@ inline void movePoints( PointDataGridT& points,
                 leaf.replaceAttributeSet(
                     new AttributeSet(existingAttributeSet, leaf.getLastValue(), &lock),
                     /*allowMismatchingDescriptors=*/true);
-                // store the index of the source leaf in a corresponding target leaf array
-                const auto it = sourceLeafMap.find(leaf.origin());
-                if (it != sourceLeafMap.end()) {
-                    sourceIndices[idx] = it->second;
+                for (size_t i = 0; i < sourceLeafMaps.size(); i++) {
+                    const auto& sourceLeafMap = sourceLeafMaps[i];
+                    auto& sourceIndices = sourceIndicesArray[i];
+                    // store the index of the source leaf in a corresponding target leaf array
+                    const auto it = sourceLeafMap.find(leaf.origin());
+                    if (it != sourceLeafMap.end()) {
+                        sourceIndices[idx] = it->second;
+                    }
                 }
                 // allocate offset maps
                 offsetMap[idx].resize(LeafT::SIZE);
@@ -413,15 +460,22 @@ inline void movePoints( PointDataGridT& points,
 
     // moving leaf
 
-    std::vector<GlobalIndexArray> globalMoveLeafMap(targetLeafManager.leafCount());
-    std::vector<LocalIndexArray> localMoveLeafMap(targetLeafManager.leafCount());
+    std::vector<std::vector<GlobalIndexArray>> globalMoveLeafMaps(sourceLeafManagers.size());
+    for (auto& globalMoveLeafMap : globalMoveLeafMaps) {
+        globalMoveLeafMap.resize(targetLeafManager.leafCount());
+    }
+    std::vector<std::vector<LocalIndexArray>> localMoveLeafMaps(sourceLeafManagers.size());
+    for (auto& localMoveLeafMap : localMoveLeafMaps) {
+        localMoveLeafMap.resize(targetLeafManager.leafCount());
+    }
 
     // build global and local move leaf maps and update local positions
 
     const bool useIndexSpace = DeformerTraits<DeformerT>::IndexSpace;
 
-    auto updateMoveMaps = [&](const Coord& leafOrigin, const size_t leafIndex,
-        AttributeWriteHandle<Vec3f>& sourceHandle, const Index offset, const Vec3d positionWS)
+    auto updateMoveMaps = [&](std::vector<GlobalIndexArray>& globalMoveLeafMap, std::vector<LocalIndexArray>& localMoveLeafMap,
+        const Coord& leafOrigin, const size_t leafIndex, AttributeWriteHandle<Vec3f>& sourceHandle,
+        const Index offset, const Vec3d positionWS)
     {
         // transform to index-space position of target grid
 
@@ -456,58 +510,67 @@ inline void movePoints( PointDataGridT& points,
 
     // TODO: refactor using a generic lambda when C++14 is available
 
-    sourceLeafManager.foreach(
-        [&](LeafT& leaf, size_t idx) {
-            DeformerT newDeformer(deformer);
-            newDeformer.reset(leaf, idx);
+    for (size_t i = 0; i < sourceLeafManagers.size(); i++) {
+        auto& sourceLeafManager(sourceLeafManagers[i]);
+        auto& globalMoveLeafMap = globalMoveLeafMaps[i];
+        auto& localMoveLeafMap = localMoveLeafMaps[i];
 
-            auto sourceHandle = AttributeWriteHandle<Vec3f>::create(leaf.attributeArray("P"));
+        sourceLeafManager.foreach(
+            [&](LeafT& leaf, size_t idx) {
+                DeformerT newDeformer(deformer);
+                newDeformer.reset(leaf, idx);
 
-            for (auto iter = leaf.beginIndexOn(filter); iter; iter++) {
+                auto sourceHandle = AttributeWriteHandle<Vec3f>::create(leaf.attributeArray("P"));
 
-                // extract index-space position and apply index-space deformation (if applicable)
+                for (auto iter = leaf.beginIndexOn(filter); iter; iter++) {
 
-                Vec3d positionIS = sourceHandle->get(*iter) + iter.getCoord().asVec3d();
-                if (useIndexSpace) {
-                   newDeformer.apply(positionIS, iter);
+                    // extract index-space position and apply index-space deformation (if applicable)
+
+                    Vec3d positionIS = sourceHandle->get(*iter) + iter.getCoord().asVec3d();
+                    if (useIndexSpace) {
+                       newDeformer.apply(positionIS, iter);
+                    }
+
+                    // transform to world-space position and apply world-space deformation (if applicable)
+
+                    Vec3d positionWS = points.transform().indexToWorld(positionIS);
+                    if (!useIndexSpace) {
+                        newDeformer.apply(positionWS, iter);
+                    }
+
+                    updateMoveMaps(globalMoveLeafMap, localMoveLeafMap,
+                        leaf.origin(), idx, *sourceHandle, *iter, positionWS);
                 }
-
-                // transform to world-space position and apply world-space deformation (if applicable)
-
-                Vec3d positionWS = points.transform().indexToWorld(positionIS);
-                if (!useIndexSpace) {
-                    newDeformer.apply(positionWS, iter);
-                }
-
-                updateMoveMaps(leaf.origin(), idx, *sourceHandle, *iter, positionWS);
-            }
-        }, threaded
-    );
+            }, threaded
+        );
+    }
 
     // build a sorted index vector for each leaf that references the global move map
     // indices in order of their source leafs and voxels to ensure determinism in the
     // resulting point orders
 
-    std::vector<LeafIndexArray> globalMoveLeafIndices(globalMoveLeafMap.size());
+    std::vector<std::vector<LeafIndexArray>> globalMoveLeafIndicesArray(sourceLeafManagers.size());
 
     targetLeafManager.foreach(
         [&](LeafT& /*leaf*/, size_t idx) {
-            const GlobalIndexArray& moveIndices = globalMoveLeafMap[idx];
-            if (moveIndices.empty())  return;
+            for (size_t i = 0; i < sourceLeafManagers.size(); i++) {
+                const GlobalIndexArray& moveIndices = globalMoveLeafMaps[i][idx];
+                if (moveIndices.empty())  return;
 
-            LeafIndexArray& sortedIndices = globalMoveLeafIndices[idx];
-            sortedIndices.resize(moveIndices.size());
-            std::iota(std::begin(sortedIndices), std::end(sortedIndices), 0);
-            std::sort(std::begin(sortedIndices), std::end(sortedIndices),
-                [&](int i, int j)
-                {
-                    const Index& indexI0(std::get<0>(moveIndices[i]));
-                    const Index& indexJ0(std::get<0>(moveIndices[j]));
-                    if (indexI0 < indexJ0)          return true;
-                    if (indexI0 > indexJ0)          return false;
-                    return std::get<2>(moveIndices[i]) < std::get<2>(moveIndices[j]);
-                }
-            );
+                LeafIndexArray& sortedIndices = globalMoveLeafIndicesArray[i][idx];
+                sortedIndices.resize(moveIndices.size());
+                std::iota(std::begin(sortedIndices), std::end(sortedIndices), 0);
+                std::sort(std::begin(sortedIndices), std::end(sortedIndices),
+                    [&](int i, int j)
+                    {
+                        const Index& indexI0(std::get<0>(moveIndices[i]));
+                        const Index& indexJ0(std::get<0>(moveIndices[j]));
+                        if (indexI0 < indexJ0)          return true;
+                        if (indexI0 > indexJ0)          return false;
+                        return std::get<2>(moveIndices[i]) < std::get<2>(moveIndices[j]);
+                    }
+                );
+            }
         },
     threaded);
 
@@ -527,49 +590,55 @@ inline void movePoints( PointDataGridT& points,
         targetLeafManager.foreach(
             [&](LeafT& leaf, size_t idx)
             {
-                const GlobalIndexArray& moveIndices = globalMoveLeafMap[idx];
-                if (moveIndices.empty())  return;
-                const LeafIndexArray& sortedIndices = globalMoveLeafIndices[idx];
+                for (size_t i = 0; i < sourceLeafManagers.size(); i++) {
+                    const LeafManagerT& sourceLeafManager = sourceLeafManagers[i];
+                    const auto& globalMoveLeafMap = globalMoveLeafMaps[i];
+                    const auto& globalMoveLeafIndices = globalMoveLeafIndicesArray[i];
 
-                // extract per-voxel offsets for this leaf
+                    const GlobalIndexArray& moveIndices = globalMoveLeafMap[idx];
+                    if (moveIndices.empty())  return;
+                    const LeafIndexArray& sortedIndices = globalMoveLeafIndices[idx];
 
-                LeafIndexArray& offsets = offsetMap[idx];
+                    // extract per-voxel offsets for this leaf
 
-                // extract target array and ensure data is out-of-core and non-uniform
+                    LeafIndexArray& offsets = offsetMap[idx];
 
-                auto& targetArray = leaf.attributeArray(attributeIndex);
-                targetArray.loadData();
-                targetArray.expand();
+                    // extract target array and ensure data is out-of-core and non-uniform
 
-                // perform the copy
+                    auto& targetArray = leaf.attributeArray(attributeIndex);
+                    targetArray.loadData();
+                    targetArray.expand();
 
-                GlobalCopyIterator<LeafT> copyIterator(
-                    leaf, sortedIndices, moveIndices, offsets);
+                    // perform the copy
 
-                // use the sorted indices to track the index of the source leaf
+                    GlobalCopyIterator<LeafT> copyIterator(
+                        leaf, sortedIndices, moveIndices, offsets);
 
-                Index sourceLeafIndex = copyIterator.leafIndex(0);
-                Index startIndex = 0;
+                    // use the sorted indices to track the index of the source leaf
 
-                for (size_t i = 1; i <= sortedIndices.size(); i++) {
-                    Index endIndex = static_cast<Index>(i);
-                    Index newSourceLeafIndex = copyIterator.leafIndex(endIndex);
+                    Index sourceLeafIndex = copyIterator.leafIndex(0);
+                    Index startIndex = 0;
 
-                    // when it changes, do a batch-copy of all the indices that lie within this range
-                    // TODO: this step could use nested parallelization for cases where there are a
-                    // large number of points being moved per attribute
+                    for (size_t i = 1; i <= sortedIndices.size(); i++) {
+                        Index endIndex = static_cast<Index>(i);
+                        Index newSourceLeafIndex = copyIterator.leafIndex(endIndex);
 
-                    if (newSourceLeafIndex > sourceLeafIndex) {
-                        copyIterator.reset(startIndex, endIndex);
+                        // when it changes, do a batch-copy of all the indices that lie within this range
+                        // TODO: this step could use nested parallelization for cases where there are a
+                        // large number of points being moved per attribute
 
-                        const LeafT& sourceLeaf = sourceLeafManager.leaf(sourceLeafIndex);
-                        const auto& sourceArray = sourceLeaf.constAttributeArray(attributeIndex);
-                        sourceArray.loadData();
+                        if (newSourceLeafIndex > sourceLeafIndex) {
+                            copyIterator.reset(startIndex, endIndex);
 
-                        targetArray.copyValuesUnsafe(sourceArray, copyIterator);
+                            const LeafT& sourceLeaf = sourceLeafManager.leaf(sourceLeafIndex);
+                            const auto& sourceArray = sourceLeaf.constAttributeArray(attributeIndex);
+                            sourceArray.loadData();
 
-                        sourceLeafIndex = newSourceLeafIndex;
-                        startIndex = endIndex;
+                            targetArray.copyValuesUnsafe(sourceArray, copyIterator);
+
+                            sourceLeafIndex = newSourceLeafIndex;
+                            startIndex = endIndex;
+                        }
                     }
                 }
             }, threaded
@@ -580,31 +649,37 @@ inline void movePoints( PointDataGridT& points,
         targetLeafManager.foreach(
             [&](LeafT& leaf, size_t idx)
             {
-                const LocalIndexArray& moveIndices = localMoveLeafMap[idx];
-                if (moveIndices.empty())  return;
+                for (size_t i = 0; i < sourceLeafManagers.size(); i++) {
+                    const auto& sourceLeafManager = sourceLeafManagers[i];
+                    const auto& localMoveLeafMap = localMoveLeafMaps[i];
+                    const auto& sourceIndices = sourceIndicesArray[i];
 
-                // extract per-voxel offsets for this leaf
+                    const LocalIndexArray& moveIndices = localMoveLeafMap[idx];
+                    if (moveIndices.empty())  return;
 
-                LeafIndexArray& offsets = offsetMap[idx];
+                    // extract per-voxel offsets for this leaf
 
-                // extract source array that has the same origin as the target leaf
+                    LeafIndexArray& offsets = offsetMap[idx];
 
-                assert(idx < sourceIndices.size());
-                const Index sourceLeafOffset(sourceIndices[idx]);
-                LeafT& sourceLeaf = sourceLeafManager.leaf(sourceLeafOffset);
-                const auto& sourceArray = sourceLeaf.constAttributeArray(attributeIndex);
-                sourceArray.loadData();
+                    // extract source array that has the same origin as the target leaf
 
-                // extract target array and ensure data is out-of-core and non-uniform
+                    assert(idx < sourceIndices.size());
+                    const Index sourceLeafOffset(sourceIndices[idx]);
+                    LeafT& sourceLeaf = sourceLeafManager.leaf(sourceLeafOffset);
+                    const auto& sourceArray = sourceLeaf.constAttributeArray(attributeIndex);
+                    sourceArray.loadData();
 
-                auto& targetArray = leaf.attributeArray(attributeIndex);
-                targetArray.loadData();
-                targetArray.expand();
+                    // extract target array and ensure data is out-of-core and non-uniform
 
-                // perform the copy
+                    auto& targetArray = leaf.attributeArray(attributeIndex);
+                    targetArray.loadData();
+                    targetArray.expand();
 
-                LocalCopyIterator<LeafT> copyIterator(leaf, moveIndices, offsets);
-                targetArray.copyValuesUnsafe(sourceArray, copyIterator);
+                    // perform the copy
+
+                    LocalCopyIterator<LeafT> copyIterator(leaf, moveIndices, offsets);
+                    targetArray.copyValuesUnsafe(sourceArray, copyIterator);
+                }
             }, threaded
         );
     }
@@ -613,14 +688,14 @@ inline void movePoints( PointDataGridT& points,
 }
 
 
-template <typename PointDataGridT, typename DeformerT, typename FilterT>
+template <typename PointDataGridT, typename DeformerT, typename FilterT, typename MergeFilterT>
 inline void movePoints( PointDataGridT& points,
                         DeformerT& deformer,
                         const FilterT& filter,
-                        future::Advect* objectNotInUse,
+                        std::vector<MergePoints<PointDataGridT, MergeFilterT>>* mergePoints,
                         bool threaded)
 {
-    movePoints(points, points.transform(), deformer, filter, objectNotInUse, threaded);
+    movePoints(points, points.transform(), deformer, filter, mergePoints, threaded);
 }
 
 
