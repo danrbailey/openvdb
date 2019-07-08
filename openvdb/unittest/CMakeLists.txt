@@ -142,6 +142,7 @@ set(UNITTEST_SOURCE_FILES
   TestPointGroup.cc
   TestPointIndexGrid.cc
   TestPointMask.cc
+  TestPointMerge.cc
   TestPointMove.cc
   TestPointPartitioner.cc
   TestPointSample.cc
