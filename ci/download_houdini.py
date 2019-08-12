@@ -23,7 +23,7 @@ br.set_handle_robots(False)
 # login to sidefx.com as openvdb
 br.open('https://www.sidefx.com/login/?next=/download/daily-builds')
 br.select_form(nr=0)
-br.form['username'] = 'openvdb'
+br.form['username'] = 'danbailey'
 br.form['password'] = password
 br.submit()
 
