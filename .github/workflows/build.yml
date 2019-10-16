@@ -49,6 +49,7 @@ jobs:
       run: cd build && ctest -V
 
   testhou175:
+    if: ${{ secrets.HOUPASS }}
     runs-on: ubuntu-16.04
     container:
       image: aswf/ci-base:2018
@@ -60,6 +61,7 @@ jobs:
       run: ./ci/build_houdini.sh clang++ Release ON
 
   testhou170:
+    if: ${{ secrets.HOUPASS }}
     runs-on: ubuntu-16.04
     container:
       image: aswf/ci-base:2018
@@ -82,6 +84,7 @@ jobs:
       run: cd build && ctest -V
 
   testhou175gcc:
+    if: ${{ secrets.HOUPASS }}
     runs-on: ubuntu-16.04
     container:
       image: aswf/ci-base:2018
@@ -93,6 +96,7 @@ jobs:
       run: ./ci/build_houdini.sh g++ Release OFF
 
   testhou175debug:
+    if: ${{ secrets.HOUPASS }}
     runs-on: ubuntu-16.04
     container:
       image: aswf/ci-base:2018
