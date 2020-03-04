@@ -1,0 +1,64 @@
+
+name: Houdini
+
+on: [push]
+
+# on:
+#   schedule:
+#     # run this workflow every wednesday at noon UTC
+#     - cron:  '0 12 * * 3'
+
+jobs:
+  houdini18_0:
+    runs-on: ubuntu-16.04
+    container:
+      image: aswf/ci-base:2019
+    steps:
+    - uses: actions/checkout@v2
+    - name: download_houdini
+      run: ./ci/download_houdini2.sh 18.0 ON ON ${{ secrets.HOUDINI_CLIENT_ID }} ${{ secrets.HOUDINI_SECRET_KEY }}
+    - name: install_houdini
+      run: ./ci/install_houdini2.sh 18.0
+    - name: build
+      run: ./ci/build_houdini.sh clang++ Release ON
+    - name: write_houdini_cache
+      uses: actions/cache@v1
+      with:
+        path: hou.tar.gz
+        key: vdb3-houdini18_0-${{ hashFiles('hou.tar.gz') }}
+
+  houdini17_5:
+    runs-on: ubuntu-16.04
+    container:
+      image: aswf/ci-base:2018
+    steps:
+    - uses: actions/checkout@v2
+    - name: download_houdini
+      run: ./ci/download_houdini2.sh 17.5 ON ON ${{ secrets.HOUDINI_CLIENT_ID }} ${{ secrets.HOUDINI_SECRET_KEY }}
+    - name: install_houdini
+      run: ./ci/install_houdini2.sh 17.5
+    - name: build
+      run: ./ci/build_houdini.sh clang++ Release ON
+    - name: write_houdini_cache
+      uses: actions/cache@v1
+      with:
+        path: hou.tar.gz
+        key: vdb3-houdini17_5-${{ hashFiles('hou.tar.gz') }}
+
+  houdini17_0:
+    runs-on: ubuntu-16.04
+    container:
+      image: aswf/ci-base:2018
+    steps:
+    - uses: actions/checkout@v2
+    - name: download_houdini
+      run: ./ci/download_houdini2.sh 17.0 ON ON ${{ secrets.HOUDINI_CLIENT_ID }} ${{ secrets.HOUDINI_SECRET_KEY }}
+    - name: install_houdini
+      run: ./ci/install_houdini2.sh 17.0
+    - name: build
+      run: ./ci/build_houdini.sh clang++ Release ON
+    - name: write_houdini_cache
+      uses: actions/cache@v1
+      with:
+        path: hou.tar.gz
+        key: vdb3-houdini17_0-${{ hashFiles('hou.tar.gz') }}
