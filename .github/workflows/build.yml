@@ -13,13 +13,13 @@ jobs:
             echo "HOUDINI_CLIENT_ID GitHub Action Secret needs to be set to test Houdini builds"
             exit 1
           fi
-          if [ "$HOUDINI_CLIENT_KEY" == "" ]; then
-            echo "HOUDINI_CLIENT_KEY GitHub Action Secret needs to be set to test Houdini builds"
+          if [ "$HOUDINI_SECRET_KEY" == "" ]; then
+            echo "HOUDINI_SECRET_KEY GitHub Action Secret needs to be set to test Houdini builds"
             exit 1
           fi
       env:
         HOUDINI_CLIENT_ID: ${{ secrets.HOUDINI_CLIENT_ID }}
-        HOUDINI_CLIENT_KEY: ${{ secrets.HOUDINI_CLIENT_KEY }}
+        HOUDINI_SECRET_KEY: ${{ secrets.HOUDINI_SECRET_KEY }}
 
   # testabi7:
   #   runs-on: ubuntu-16.04
