@@ -1,0 +1,20 @@
+
+name: Houdini
+
+on:
+  push:
+    branches:
+      - 'master'
+
+jobs:
+  houdini18_0:
+    runs-on: ubuntu-16.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: download_houdini
+      run: ./ci/download_houdini.sh 18.0 ON ON ${{ secrets.HOUDINI_CLIENT_ID }} ${{ secrets.HOUDINI_SECRET_KEY }}
+    - name: write_houdini_cache
+      uses: actions/cache@v1
+      with:
+        path: houdini18_0
+        key: test7houdini18_0-${{ hashFiles('houdini18_0/hou.tar.gz') }}
