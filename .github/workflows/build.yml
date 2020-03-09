@@ -54,8 +54,17 @@ jobs:
       image: aswf/ci-base:2019
     steps:
     - uses: actions/checkout@v1
+    - name: Generate timestamp
+      id: timestamp
+      run: echo "::set-output name=date::`date -u +'%Y-%m-%dT%H:%M:%SZ'`"
+    - name: fetch_houdini
+      uses: actions/cache@v1
+      with:
+        path: .
+        key: vdb1-houdini18_0-${{ steps.timestamp.outputs.date }}
+        restore-keys: vdb1-houdini18_0-
     - name: houdini
-      run: ./ci/install_houdini.sh 18.0 ${{ secrets.HOUPASS }}
+      run: ./ci/install_houdini2.sh
     - name: build
       run: ./ci/build_houdini.sh clang++ Release ON
     - name: test
