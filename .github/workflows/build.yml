@@ -158,9 +158,10 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: debug
+      shell: bash
       run: |
-        cd "${VCPKG_INSTALLATION_ROOT}"
-        dir
+        cd C:\vcpkg
+        ls
     # - name: path
     #   run: |
     #     # note: system path must be modified in a previous step to it's use
