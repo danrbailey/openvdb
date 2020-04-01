@@ -161,7 +161,10 @@ jobs:
       shell: bash
       run: |
         cd C:\vcpkg
-        ls
+        .\vcpkg.exe version
+        git pull
+        .\bootstrap-vcpkg.bat
+
     # - name: path
     #   run: |
     #     # note: system path must be modified in a previous step to it's use
