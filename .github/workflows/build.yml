@@ -161,9 +161,9 @@ jobs:
       shell: bash
       run: |
         cd C:\vcpkg
-        .\vcpkg.exe version
+        vcpkg.exe version
         git pull
-        .\bootstrap-vcpkg.bat
+        bootstrap-vcpkg.bat
 
     # - name: path
     #   run: |
