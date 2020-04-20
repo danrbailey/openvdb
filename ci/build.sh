@@ -26,4 +26,9 @@ cmake \
     -DOPENVDB_BUILD_VDB_VIEW=ON \
     -DOPENVDB_SIMD=${SIMD} \
     ..
+
+df -h
+
 make -j2
+
+du -h
