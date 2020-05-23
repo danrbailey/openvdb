@@ -60,7 +60,7 @@ jobs:
     - name: fetch_houdini
       uses: actions/cache@v1
       with:
-        path: .
+        path: hou
         key: vdb1-houdini18_0-${{ steps.timestamp.outputs.date }}
         restore-keys: vdb1-houdini18_0-
     - name: houdini
