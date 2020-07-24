@@ -89,6 +89,7 @@ Bug fixes:
 - Fixed a compiler error when using C++17 by changing std::unexpected() to
   std::terminate().
   <I>[Contributed&nbsp;by&nbsp;Mark&nbsp;Sisson]</I>
+- Removed use of std::random_shuffle as it is now deprecated in C++14.
 
 @par
 API changes:

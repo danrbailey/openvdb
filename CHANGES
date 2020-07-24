@@ -68,6 +68,7 @@ Version 7.1.0 - In Development
     - Fixed a compiler error when using C++17 by changing std::unexpected() to
       std::terminate().
       [Contributed by Mark Sisson]
+    - Removed use of std::random_shuffle as it is now deprecated in C++14.
 
     API changes:
     - Removed a number of deprecated point methods.
