@@ -13,7 +13,6 @@
 #include <openvdb/io/Compression.h> // for truncateRealToHalf()
 #include <openvdb/math/Math.h> // for isZero(), isExactlyEqual(), etc.
 #include <openvdb/math/BBox.h>
-#include <openvdb/util/NodeMasks.h> // for backward compatibility only (see readTopology())
 #include <openvdb/version.h>
 #include <tbb/parallel_for.h>
 #include <map>
@@ -2326,9 +2325,23 @@ RootNode<ChildT>::readTopology(std::istream& is, bool fromHalf)
         tableSize = 1U << tableSize;
 
         // Read masks.
-        util::RootNodeMask childMask(tableSize), valueMask(tableSize);
-        childMask.load(is);
-        valueMask.load(is);
+
+        Index32 intSize(((tableSize-1)>>5)+1);
+        auto childMaskBits = std::make_unique<Index32[]>(intSize);
+        auto valueMaskBits = std::make_unique<Index32[]>(intSize);
+
+        is.read(reinterpret_cast<char*>(childMaskBits.get()), intSize * sizeof(Index32));
+        is.read(reinterpret_cast<char*>(valueMaskBits.get()), intSize * sizeof(Index32));
+
+        auto isChildMaskOn = [&](Index32 i)
+        {
+            return (childMaskBits[i >> 5] & (1<<(i&31)));
+        };
+
+        auto isValueMaskOn = [&](Index32 i)
+        {
+            return (valueMaskBits[i >> 5] & (1<<(i&31)));
+        };
 
         // Read child nodes/values.
         for (Index i = 0; i < tableSize; ++i) {
@@ -2341,7 +2354,7 @@ RootNode<ChildT>::readTopology(std::istream& is, bool fromHalf)
             origin[2] = (n & ((1U << log2Dim[2]) - 1)) + offset[1];
             origin <<= ChildT::TOTAL;
 
-            if (childMask.isOn(i)) {
+            if (isChildMaskOn(i)) {
                 // Read in and insert a child node.
                 ChildT* child = new ChildT(PartialCreate(), origin, mBackground);
                 child->readTopology(is);
@@ -2351,8 +2364,8 @@ RootNode<ChildT>::readTopology(std::istream& is, bool fromHalf)
                 // is either active or non-background.
                 ValueType value;
                 is.read(reinterpret_cast<char*>(&value), sizeof(ValueType));
-                if (valueMask.isOn(i) || (!math::isApproxEqual(value, mBackground))) {
-                    mTable[origin] = NodeStruct(Tile(value, valueMask.isOn(i)));
+                if (isValueMaskOn(i) || (!math::isApproxEqual(value, mBackground))) {
+                    mTable[origin] = NodeStruct(Tile(value, isValueMaskOn(i)));
                 }
             }
         }

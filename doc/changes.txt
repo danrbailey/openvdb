@@ -2100,8 +2100,8 @@ API changes:
   LeafManager::LeafRange::Iterator@endlink,
   @vdblink::util::BaseMaskIterator::operator=() BaseMaskIterator@endlink,
   @vdblink::util::NodeMask::operator=() NodeMask@endlink and
-  @vdblink::util::RootNodeMask::operator=() RootNodeMask@endlink
-  now return references to the respective objects.
+  util::RootNodeMask::operator=() now return references to the respective
+  objects.
 - Removed a number of methods that were deprecated in version&nbsp;2.0.0
   or earlier.
 
