@@ -2311,13 +2311,28 @@ RootNode<ChildT>::readTopology(std::istream& is, bool fromHalf)
         is.read(reinterpret_cast<char*>(rangeMin.asPointer()), 3 * sizeof(Int32));
         is.read(reinterpret_cast<char*>(rangeMax.asPointer()), 3 * sizeof(Int32));
 
+        /// Return the most significant on bit of the given 32-bit value.
+        auto findHighestOn = [&](Index32 v)
+        {
+            static const Byte DeBruijn[32] = {
+                    0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
+                    8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
+            };
+            v |= v >> 1; // first round down to one less than a power of 2
+            v |= v >> 2;
+            v |= v >> 4;
+            v |= v >> 8;
+            v |= v >> 16;
+            return DeBruijn[Index32(v * 0x07C4ACDDU) >> 27];
+        };
+
         this->initTable();
         Index tableSize = 0, log2Dim[4] = { 0, 0, 0, 0 };
         Int32 offset[3];
         for (int i = 0; i < 3; ++i) {
             offset[i] = rangeMin[i] >> ChildT::TOTAL;
             rangeMin[i] = offset[i] << ChildT::TOTAL;
-            log2Dim[i] = 1 + util::FindHighestOn((rangeMax[i] >> ChildT::TOTAL) - offset[i]);
+            log2Dim[i] = 1 + findHighestOn((rangeMax[i] >> ChildT::TOTAL) - offset[i]);
             tableSize += log2Dim[i];
             rangeMax[i] = (((1 << log2Dim[i]) + offset[i]) << ChildT::TOTAL) - 1;
         }
