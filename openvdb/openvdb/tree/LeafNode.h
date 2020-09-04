@@ -219,11 +219,13 @@ protected:
 
         void setItem(Index pos, const ValueT& value) const
         {
-            this->parent().setValueOnly(pos, value);
+            NodeT& parent = this->parent();
+            parent.setValueOnly(pos, value);
         }
         void setValue(const ValueT& value) const
         {
-            this->parent().setValueOnly(this->pos(), value);
+            NodeT& parent = this->parent();
+            parent.setValueOnly(this->pos(), value);
         }
 
         template<typename ModifyOp>
