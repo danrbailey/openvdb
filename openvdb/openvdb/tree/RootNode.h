@@ -464,7 +464,7 @@ public:
     using ChildOnIter = ChildIter<RootNode, MapIter, ChildOnPred, ChildType>;
     using ChildOnCIter = ChildIter<const RootNode, MapCIter, ChildOnPred, const ChildType>;
     using ChildOffIter = ValueIter<RootNode, MapIter, ChildOffPred, const ValueType>;
-    using ChildOffCIter = ConstValueIter<const RootNode, MapCIter, ChildOffPred, ValueType>;
+    using ChildOffCIter = ConstValueIter<const RootNode, MapCIter, ChildOffPred, const ValueType>;
     using ChildAllIter = DenseIter<RootNode, MapIter, ChildType, ValueType>;
     using ChildAllCIter = ConstDenseIter<const RootNode, MapCIter, const ChildType, const ValueType>;
 

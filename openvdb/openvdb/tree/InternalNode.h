@@ -165,7 +165,7 @@ protected:
         ValueIter(const MaskIterT& iter, NodeT* parent): SparseIteratorBase<
             MaskIterT, ValueIter<NodeT, ValueT, MaskIterT, TagT>, NodeT, ValueT>(iter, parent) {}
 
-        const ValueT& getItem(Index pos) const { return this->parent().mNodes[pos].getValue(); }
+        ValueT& getItem(Index pos) const { return this->parent().mNodes[pos].getValue(); }
 
         void setItem(Index pos, const ValueT& v) const { this->parent().mNodes[pos].setValue(v); }
 
@@ -184,7 +184,7 @@ protected:
         ConstValueIter(const MaskIterT& iter, NodeT* parent): SparseIteratorBase<
             MaskIterT, ConstValueIter<NodeT, ValueT, MaskIterT, TagT>, NodeT, ValueT>(iter, parent) {}
 
-        const ValueT& getItem(Index pos) const { return this->parent().mNodes[pos].getValue(); }
+        ValueT& getItem(Index pos) const { return this->parent().mNodes[pos].getValue(); }
     };// ConstValueIter
 
     // Dense iterator that visits both tiles and child nodes of an InternalNode
@@ -234,7 +234,7 @@ protected:
         ConstDenseIter(const MaskDenseIterator& iter, NodeT* parent):
             DenseIteratorBase<MaskDenseIterator, ConstDenseIter, NodeT, ChildT, ValueT>(iter, parent) {}
 
-        bool getItem(Index pos, ChildT*& child, NonConstValueT& value) const
+        bool getItem(Index pos, ChildT*& child, ValueT& value) const
         {
             if (this->parent().isChildMaskOn(pos)) {
                 child = this->parent().getChildNode(pos);
