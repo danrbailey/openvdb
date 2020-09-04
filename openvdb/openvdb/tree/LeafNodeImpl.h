@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #include <openvdb/io/Compression.h> // for io::readCompressedValues(), etc.
+#include <openvdb/points/StreamCompression.h>
 
 #include "LeafNode.h"
 
