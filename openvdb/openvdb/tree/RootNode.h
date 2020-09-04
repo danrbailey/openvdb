@@ -254,6 +254,59 @@ private:
         MapIterT mIter;
     }; // BaseIter
 
+    template<typename _RootNodeT, typename _MapIterT, typename FilterPredT>
+    class ConstBaseIter
+    {
+    public:
+        using RootNodeT = _RootNodeT;
+        using MapIterT = _MapIterT; // either MapIter or MapCIter
+
+        bool operator==(const ConstBaseIter& other) const
+        {
+            return (mParentNode == other.mParentNode) && (mIter == other.mIter);
+        }
+        bool operator!=(const ConstBaseIter& other) const { return !(*this == other); }
+
+        RootNodeT* getParentNode() const { return mParentNode; }
+        /// Return a reference to the node over which this iterator iterates.
+        RootNodeT& parent() const
+        {
+            if (!mParentNode) OPENVDB_THROW(ValueError, "iterator references a null parent node");
+            return *mParentNode;
+        }
+
+        bool test() const { assert(mParentNode); return mIter != mParentNode->mTable.end(); }
+        operator bool() const { return this->test(); }
+
+        void increment() { if (this->test()) { ++mIter; } this->skip(); }
+        bool next() { this->increment(); return this->test(); }
+        void increment(Index n) { for (Index i = 0; i < n && this->next(); ++i) {} }
+
+        /// @brief Return this iterator's position as an offset from
+        /// the beginning of the parent node's map.
+        Index pos() const
+        {
+            return !mParentNode ? 0U : Index(std::distance(mParentNode->mTable.begin(), mIter));
+        }
+
+        bool isValueOn() const { return RootNodeT::isTileOn(mIter); }
+        bool isValueOff() const { return RootNodeT::isTileOff(mIter); }
+
+        /// Return the coordinates of the item to which this iterator is pointing.
+        Coord getCoord() const { return mIter->first; }
+        /// Return in @a xyz the coordinates of the item to which this iterator is pointing.
+        void getCoord(Coord& xyz) const { xyz = this->getCoord(); }
+
+    protected:
+        ConstBaseIter(): mParentNode(nullptr) {}
+        ConstBaseIter(RootNodeT& parent, const MapIterT& iter): mParentNode(&parent), mIter(iter) {}
+
+        void skip() { while (this->test() && !FilterPredT::test(mIter)) ++mIter; }
+
+        RootNodeT* mParentNode;
+        MapIterT mIter;
+    }; // ConstBaseIter
+
     template<typename RootNodeT, typename MapIterT, typename FilterPredT, typename ChildNodeT>
     class ChildIter: public BaseIter<RootNodeT, MapIterT, FilterPredT>
     {
@@ -308,10 +361,10 @@ private:
     }; // ValueIter
 
     template<typename RootNodeT, typename MapIterT, typename FilterPredT, typename ValueT>
-    class ConstValueIter: public BaseIter<RootNodeT, MapIterT, FilterPredT>
+    class ConstValueIter: public ConstBaseIter<RootNodeT, MapIterT, FilterPredT>
     {
     public:
-        using BaseT = BaseIter<RootNodeT, MapIterT, FilterPredT>;
+        using BaseT = ConstBaseIter<RootNodeT, MapIterT, FilterPredT>;
         using NodeType = RootNodeT;
         using ValueType = ValueT;
         using NonConstNodeType = typename std::remove_const<NodeType>::type;
@@ -374,10 +427,10 @@ private:
     }; // DenseIter
 
     template<typename RootNodeT, typename MapIterT, typename ChildNodeT, typename ValueT>
-    class ConstDenseIter: public BaseIter<RootNodeT, MapIterT, NullPred>
+    class ConstDenseIter: public ConstBaseIter<RootNodeT, MapIterT, NullPred>
     {
     public:
-        using BaseT = BaseIter<RootNodeT, MapIterT, NullPred>;
+        using BaseT = ConstBaseIter<RootNodeT, MapIterT, NullPred>;
         using NodeType = RootNodeT;
         using ValueType = ValueT;
         using ChildNodeType = ChildNodeT;
