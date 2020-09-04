@@ -1173,6 +1173,14 @@ InternalNode<ChildT, Log2Dim>::probeLeaf(const Coord& xyz)
 
 
 template<typename ChildT, Index Log2Dim>
+inline const typename ChildT::LeafNodeType*
+InternalNode<ChildT, Log2Dim>::probeLeaf(const Coord& xyz) const
+{
+    return this->template probeConstNode<LeafNodeType>(xyz);
+}
+
+
+template<typename ChildT, Index Log2Dim>
 template<typename AccessorT>
 inline typename ChildT::LeafNodeType*
 InternalNode<ChildT, Log2Dim>::probeLeafAndCache(const Coord& xyz, AccessorT& acc)
