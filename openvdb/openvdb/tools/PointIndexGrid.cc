@@ -17,12 +17,12 @@ namespace OPENVDB_VERSION_NAME {
 // explicit template instantiation
 
 #define OPENVDB_TREE4(T, N1, N2, N3, LeafT) \
-    template class Grid<tree::Tree<tree::RootNode<tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>>>>; \
-    template class tree::Tree<tree::RootNode<tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>>>; \
-    template class tree::RootNode<tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>>; \
-    template class tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>; \
-    template class tree::InternalNode<LeafT<T, N3>, N2>; \
-    template struct LeafT<T, N3>;
+    template class OPENVDB_EXPORT Grid<tree::Tree<tree::RootNode<tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>>>>; \
+    template class OPENVDB_EXPORT tree::Tree<tree::RootNode<tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>>>; \
+    template class OPENVDB_EXPORT tree::RootNode<tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>>; \
+    template class OPENVDB_EXPORT tree::InternalNode<tree::InternalNode<LeafT<T, N3>, N2>, N1>; \
+    template class OPENVDB_EXPORT tree::InternalNode<LeafT<T, N3>, N2>; \
+    template struct OPENVDB_EXPORT LeafT<T, N3>;
 
 OPENVDB_TREE4_POINT_INDEX_INITIALIZE()
 

@@ -13,7 +13,7 @@ namespace OPENVDB_VERSION_NAME {
 // explicit template instantiation
 
 #define OPENVDB_TREE4(T, N1, N2, N3, LeafT) \
-    template class LeafT<T, N3>;
+    template class OPENVDB_EXPORT LeafT<T, N3>;
 
 OPENVDB_TREE4_VOLUME_INITIALIZE()
 OPENVDB_TREE4_PRIVATE_INITIALIZE()

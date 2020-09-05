@@ -14,8 +14,8 @@ namespace tree {
 // explicit template instantiation
 
 #define OPENVDB_TREE4(T, N1, N2, N3, LeafT) \
-    template class InternalNode<LeafT<T, N3>, N2>; \
-    template class InternalNode<InternalNode<LeafT<T, N3>, N2>, N1>;
+    template class OPENVDB_EXPORT InternalNode<LeafT<T, N3>, N2>; \
+    template class OPENVDB_EXPORT InternalNode<InternalNode<LeafT<T, N3>, N2>, N1>;
 
 OPENVDB_TREE4_VOLUME_INITIALIZE()
 OPENVDB_TREE4_PRIVATE_INITIALIZE()
