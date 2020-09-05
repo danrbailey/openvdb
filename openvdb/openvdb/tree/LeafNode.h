@@ -214,8 +214,8 @@ protected:
         ValueIter() {}
         ValueIter(const MaskIterT& iter, NodeT* parent): BaseT(iter, parent) {}
 
-        ValueT& getItem(Index pos) const { return this->parent().getValue(pos); }
-        ValueT& getValue() const { return this->parent().getValue(this->pos()); }
+        const ValueT& getItem(Index pos) const { return this->parent().getValue(pos); }
+        const ValueT& getValue() const { return this->parent().getValue(this->pos()); }
 
         void setItem(Index pos, const ValueT& value) const
         {
