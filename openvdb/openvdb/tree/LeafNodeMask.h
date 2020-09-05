@@ -626,6 +626,15 @@ protected:
             MaskIterT, ChildIter<MaskIterT, NodeT>, NodeT, bool>(iter, parent) {}
     };
 
+    template<typename MaskIterT, typename NodeT>
+    struct ConstChildIter:
+        public SparseIteratorBase<MaskIterT, ConstChildIter<MaskIterT, NodeT>, NodeT, bool>
+    {
+        ConstChildIter() {}
+        ConstChildIter(const MaskIterT& iter, NodeT* parent): SparseIteratorBase<
+            MaskIterT, ConstChildIter<MaskIterT, NodeT>, NodeT, bool>(iter, parent) {}
+    };
+
     template<typename NodeT, typename ValueT>
     struct DenseIter: public DenseIteratorBase<
         MaskDenseIter, DenseIter<NodeT, ValueT>, NodeT, /*ChildT=*/void, ValueT>
