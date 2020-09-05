@@ -761,9 +761,9 @@ private:
     friend struct ValueIter<MaskOnIter, LeafNode, bool>;
     friend struct ValueIter<MaskOffIter, LeafNode, bool>;
     friend struct ValueIter<MaskDenseIter, LeafNode, bool>;
-    friend struct ValueIter<MaskOnIter, const LeafNode, bool>;
-    friend struct ValueIter<MaskOffIter, const LeafNode, bool>;
-    friend struct ValueIter<MaskDenseIter, const LeafNode, bool>;
+    friend struct ConstValueIter<MaskOnIter, const LeafNode, bool>;
+    friend struct ConstValueIter<MaskOffIter, const LeafNode, bool>;
+    friend struct ConstValueIter<MaskDenseIter, const LeafNode, bool>;
 
     //@{
     /// Allow iterators to call mask accessor methods (see below).

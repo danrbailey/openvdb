@@ -509,11 +509,11 @@ public:
         MaskDenseIterator,const PointDataLeafNode,const ValueType,ValueAll>;
     using ChildOnIter = typename BaseLeaf::template ChildIter<
         MaskOnIterator, PointDataLeafNode, ChildOn>;
-    using ChildOnCIter = typename BaseLeaf::template ChildIter<
+    using ChildOnCIter = typename BaseLeaf::template ConstChildIter<
         MaskOnIterator, const PointDataLeafNode, ChildOn>;
     using ChildOffIter = typename BaseLeaf::template ChildIter<
         MaskOffIterator, PointDataLeafNode, ChildOff>;
-    using ChildOffCIter = typename BaseLeaf::template ChildIter<
+    using ChildOffCIter = typename BaseLeaf::template ConstChildIter<
         MaskOffIterator, const PointDataLeafNode, ChildOff>;
     using ChildAllIter = typename BaseLeaf::template DenseIter<
         PointDataLeafNode, ValueType, ChildAll>;
