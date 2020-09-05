@@ -2193,6 +2193,14 @@ RootNode<ChildT>::probeLeaf(const Coord& xyz)
 
 template<typename ChildT>
 inline const typename ChildT::LeafNodeType*
+RootNode<ChildT>::probeLeaf(const Coord& xyz) const
+{
+    return this->template probeConstNode<LeafNodeType>(xyz);
+}
+
+
+template<typename ChildT>
+inline const typename ChildT::LeafNodeType*
 RootNode<ChildT>::probeConstLeaf(const Coord& xyz) const
 {
     return this->template probeConstNode<LeafNodeType>(xyz);

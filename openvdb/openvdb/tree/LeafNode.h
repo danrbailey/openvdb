@@ -884,9 +884,9 @@ protected:
     friend struct ValueIter<MaskOnIterator, LeafNode, ValueType, ValueOn>;
     friend struct ValueIter<MaskOffIterator, LeafNode, ValueType, ValueOff>;
     friend struct ValueIter<MaskDenseIterator, LeafNode, ValueType, ValueAll>;
-    friend struct ConstValueIter<MaskOnIterator, const LeafNode, ValueType, ValueOn>;
-    friend struct ConstValueIter<MaskOffIterator, const LeafNode, ValueType, ValueOff>;
-    friend struct ConstValueIter<MaskDenseIterator, const LeafNode, ValueType, ValueAll>;
+    friend struct ConstValueIter<MaskOnIterator, const LeafNode, const ValueType, ValueOn>;
+    friend struct ConstValueIter<MaskOffIterator, const LeafNode, const ValueType, ValueOff>;
+    friend struct ConstValueIter<MaskDenseIterator, const LeafNode, const ValueType, ValueAll>;
 
     // Allow iterators to call mask accessor methods (see below).
     /// @todo Make mask accessors public?
