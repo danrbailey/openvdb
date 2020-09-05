@@ -334,7 +334,7 @@ private:
     class ConstChildIter: public ConstBaseIter<RootNodeT, MapIterT, FilterPredT>
     {
     public:
-        using BaseT = BaseIter<RootNodeT, MapIterT, FilterPredT>;
+        using BaseT = ConstBaseIter<RootNodeT, MapIterT, FilterPredT>;
         using NodeType = RootNodeT;
         using ValueType = NodeType;
         using ChildNodeType = ChildNodeT;
