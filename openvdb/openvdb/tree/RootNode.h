@@ -330,6 +330,29 @@ private:
         ChildNodeT* operator->() const { return &this->getValue(); }
     }; // ChildIter
 
+    template<typename RootNodeT, typename MapIterT, typename FilterPredT, typename ChildNodeT>
+    class ConstChildIter: public ConstBaseIter<RootNodeT, MapIterT, FilterPredT>
+    {
+    public:
+        using BaseT = BaseIter<RootNodeT, MapIterT, FilterPredT>;
+        using NodeType = RootNodeT;
+        using ValueType = NodeType;
+        using ChildNodeType = ChildNodeT;
+        using NonConstNodeType = typename std::remove_const<NodeType>::type;
+        using NonConstValueType = typename std::remove_const<ValueType>::type;
+        using NonConstChildNodeType = typename std::remove_const<ChildNodeType>::type;
+        using BaseT::mIter;
+
+        ConstChildIter() {}
+        ConstChildIter(RootNodeT& parent, const MapIterT& iter): BaseT(parent, iter) { BaseT::skip(); }
+
+        ConstChildIter& operator++() { BaseT::increment(); return *this; }
+
+        ChildNodeT& getValue() const { return getChild(mIter); }
+        ChildNodeT& operator*() const { return this->getValue(); }
+        ChildNodeT* operator->() const { return &this->getValue(); }
+    }; // ConstChildIter
+
     template<typename RootNodeT, typename MapIterT, typename FilterPredT, typename ValueT>
     class ValueIter: public BaseIter<RootNodeT, MapIterT, FilterPredT>
     {
@@ -462,7 +485,7 @@ private:
 
 public:
     using ChildOnIter = ChildIter<RootNode, MapIter, ChildOnPred, ChildType>;
-    using ChildOnCIter = ChildIter<const RootNode, MapCIter, ChildOnPred, const ChildType>;
+    using ChildOnCIter = ConstChildIter<const RootNode, MapCIter, ChildOnPred, const ChildType>;
     using ChildOffIter = ValueIter<RootNode, MapIter, ChildOffPred, const ValueType>;
     using ChildOffCIter = ConstValueIter<const RootNode, MapCIter, ChildOffPred, const ValueType>;
     using ChildAllIter = DenseIter<RootNode, MapIter, ChildType, ValueType>;
