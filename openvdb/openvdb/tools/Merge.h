@@ -43,12 +43,22 @@ struct TreeToMerge
 
     /// @brief Non-const tree constructor.
     explicit TreeToMerge(TreeType* tree) : mTree(tree) { }
+    explicit TreeToMerge(typename TreeType::Ptr treePtr) : mTreePtr(treePtr), mTree(mTreePtr.get()) { }
     /// @brief Const tree constructor. As the tree is not mutable and thus cannot be pruned, a lightweight
     /// mask tree with the same topology is created that can be pruned to use as a reference.
-    explicit TreeToMerge(const TreeType* constTree) : mConstTree(constTree)
+    explicit TreeToMerge(const TreeType* constTree, bool initialize = true) : mConstTree(constTree)
     {
-        if (mConstTree)     this->initializeMask();
+        if (mConstTree && initialize)     this->initializeMask();
     }
+
+    void reset(typename TreeType::Ptr treePtr)
+    {
+        mTreePtr = treePtr;
+        mTree = mTreePtr.get();
+    }
+
+    TreeType* tree() { return mTree; }
+    const TreeType* constTree() { return mConstTree; }
 
     /// @brief Retrieve a const pointer to the root node.
     const RootNodeType* rootPtr() const;
@@ -70,15 +80,16 @@ struct TreeToMerge
     template <typename NodeT>
     void addTile(const Coord& ijk, const ValueType& value, bool active);
 
-private:
-    // DynamicNodeManager operator for mask copying
-    struct MaskUnionOp;
-
     // build a lightweight mask using a union of the const tree where leaf nodes
     // are converted into active tiles
     void initializeMask();
 
-    TreeType* const mTree = nullptr;
+private:
+    // DynamicNodeManager operator for mask copying
+    struct MaskUnionOp;
+
+    typename TreeType::Ptr mTreePtr;
+    TreeType* mTree = nullptr;
     const TreeType* const mConstTree = nullptr;
     typename MaskTreeType::Ptr mMaskTree;
 }; // struct TreeToMerge
@@ -215,6 +226,7 @@ private:
 template<typename TreeT>
 void TreeToMerge<TreeT>::initializeMask()
 {
+    if (!mConstTree)    return;
     mMaskTree.reset(new MaskTreeType);
     MaskUnionOp op(*mConstTree);
     tree::DynamicNodeManager<MaskTreeType, MaskTreeType::RootNodeType::LEVEL-1> manager(*mMaskTree);
