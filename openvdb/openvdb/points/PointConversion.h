@@ -99,6 +99,24 @@ populateAttribute(  PointDataTreeT& tree,
                     const Index stride = 1,
                     const bool insertMetadata = true);
 
+
+/// @brief  Stores point attribute array data in an existing @c PointDataGrid attribute.
+///
+/// @param  tree            the PointDataGrid to be populated.
+/// @param  pointIndexTree  a PointIndexTree into the points.
+/// @param  attributeName   the name of the VDB Points attribute to be populated.
+/// @param  offsetName      the name of the VDB Points attribute array containing the offsets.
+/// @param  data            a wrapper to the attribute data.
+///
+/// @note   A @c PointIndexGrid to the points must be supplied to perform this
+///         operation. This is required to ensure the same point index ordering.
+template <typename PointDataTreeT, typename PointIndexTreeT, typename PointArrayT>
+inline void
+populateAttributeArray( PointDataTreeT& tree, const PointIndexTreeT& pointIndexTree,
+                        const openvdb::Name& attributeName, const openvdb::Name& offsetName,
+                        const PointArrayT& data);
+
+
 /// @brief Convert the position attribute from a Point Data Grid
 ///
 /// @param positionAttribute    the position attribute to be populated.
@@ -139,6 +157,30 @@ convertPointDataGridAttribute(  TypedAttribute& attribute,
                                 const Index stride = 1,
                                 const FilterT& filter = NullFilter(),
                                 const bool inCoreOnly = false);
+
+
+/// @brief Convert the attribute array from a PointDataGrid
+///
+/// @param attribute            the attribute to be populated.
+/// @param tree                 the PointDataTree to be converted.
+/// @param pointOffsets         a vector of cumulative point offsets for each leaf.
+/// @param startOffset          a value to shift all the point offsets by
+/// @param arrayIndex           the index in the Descriptor of the array to be converted.
+/// @param arrayOffset          the index in the Descriptor of the offset array to be converted.
+/// @param includeGroups        a vector of VDB Points groups to be included (default is all)
+/// @param excludeGroups        a vector of VDB Points groups to be excluded (default is none)
+/// @param inCoreOnly           true if out-of-core leaf nodes are to be ignored
+template <typename TypedAttribute, typename PointDataTreeT>
+inline void
+convertPointDataGridAttributeArray( TypedAttribute& attribute,
+                                    const PointDataTreeT& tree,
+                                    const std::vector<Index64>& pointOffsets,
+                                    const Index64 startOffset,
+                                    const size_t arrayIndex,
+                                    const size_t arrayOffset,
+                                    const std::vector<Name>& includeGroups = std::vector<Name>(),
+                                    const std::vector<Name>& excludeGroups = std::vector<Name>(),
+                                    const bool inCoreOnly = false);
 
 
 /// @brief Convert the group from a PointDataGrid
@@ -314,6 +356,87 @@ struct PopulateAttributeOp {
     const Index                 mStride;
 };
 
+template<   typename PointDataTreeType,
+            typename PointIndexTreeType,
+            typename AttributeListType>
+struct PopulateAttributeArrayOp {
+
+    using LeafManagerT          = typename tree::LeafManager<PointDataTreeType>;
+    using LeafRangeT            = typename LeafManagerT::LeafRange;
+    using PointIndexLeafNode    = typename PointIndexTreeType::LeafNodeType;
+    using IndexArray            = typename PointIndexLeafNode::IndexArray;
+    using ValueType             = typename AttributeListType::value_type;
+
+    PopulateAttributeArrayOp(const PointIndexTreeType& pointIndexTree,
+                        const AttributeListType& data,
+                        const size_t attributeIndex,
+                        const size_t offsetIndex)
+        : mPointIndexTree(pointIndexTree)
+        , mData(data)
+        , mAttributeIndex(attributeIndex)
+        , mOffsetIndex(offsetIndex) { }
+
+    void operator()(const typename LeafManagerT::LeafRange& range) const {
+
+        for (auto leaf = range.begin(); leaf; ++leaf) {
+
+            // obtain the PointIndexLeafNode (using the origin of the current leaf)
+
+            const PointIndexLeafNode* pointIndexLeaf =
+                mPointIndexTree.probeConstLeaf(leaf->origin());
+
+            if (!pointIndexLeaf)    continue;
+
+            const IndexArray& indices = pointIndexLeaf->indices();
+
+            int totalSize = 0;
+            for (const Index64 leafIndex: indices)
+            {
+                totalSize += mData.size(leafIndex);
+            }
+
+            AttributeArray& array = leaf->attributeArray(mAttributeIndex);
+            typename AttributeWriteHandle<ValueType>::Ptr attributeWriteHandle =
+                            AttributeWriteHandle<ValueType>::create(array);
+
+            attributeWriteHandle->resize(totalSize);
+
+            AttributeArray& offsetArray = leaf->attributeArray(mOffsetIndex);
+            AttributeWriteHandle<int>::Ptr offsetWriteHandle = AttributeWriteHandle<int>::create(offsetArray);
+
+            Index64 index = 0;
+            int offset = 0;
+
+            for (const Index64 leafIndex: indices)
+            {
+                int start = 0;
+                int end = mData.size(leafIndex);
+                for (int i = start; i < end; i++) {
+                    ValueType value;
+                    mData.get(value, leafIndex, i);
+                    attributeWriteHandle->set(static_cast<Index>(offset), 0, value);
+                    offset++;
+                }
+
+                offsetWriteHandle->set(static_cast<Index>(index), /*index=*/0, offset);
+                index++;
+            }
+
+            // attempt to compact the arrays
+
+            attributeWriteHandle->compact();
+            offsetWriteHandle->compact();
+        }
+    }
+
+    //////////
+
+    const PointIndexTreeType&   mPointIndexTree;
+    const AttributeListType&    mData;
+    const size_t                mAttributeIndex;
+    const size_t                mOffsetIndex;
+};
+
 template<typename PointDataTreeType, typename Attribute, typename FilterT>
 struct ConvertPointDataGridPositionOp {
 
@@ -482,6 +605,83 @@ struct ConvertPointDataGridAttributeOp {
     const FilterT&                          mFilter;
     const bool                              mInCoreOnly;
 }; // ConvertPointDataGridAttributeOp
+
+template<typename PointDataTreeType, typename Attribute>
+struct ConvertPointDataGridAttributeArrayOp {
+
+    using LeafNode      = typename PointDataTreeType::LeafNodeType;
+    using ValueType     = typename Attribute::ValueType;
+    using HandleT       = AttributeHandle<ValueType>;
+    using LeafManagerT  = typename tree::LeafManager<const PointDataTreeType>;
+    using LeafRangeT    = typename LeafManagerT::LeafRange;
+
+    ConvertPointDataGridAttributeArrayOp(   Attribute& attribute,
+                                            const std::vector<Index64>& pointOffsets,
+                                            const Index64 startOffset,
+                                            const size_t index,
+                                            const size_t offsetIndex,
+                                            const std::vector<Name>& includeGroups = std::vector<Name>(),
+                                            const std::vector<Name>& excludeGroups = std::vector<Name>(),
+                                            const bool inCoreOnly = false)
+        : mAttribute(attribute)
+        , mPointOffsets(pointOffsets)
+        , mStartOffset(startOffset)
+        , mIndex(index)
+        , mOffsetIndex(offsetIndex)
+        , mIncludeGroups(includeGroups)
+        , mExcludeGroups(excludeGroups)
+        , mInCoreOnly(inCoreOnly) { }
+
+    void operator()(const LeafRangeT& range) const {
+
+        const bool useGroups = !mIncludeGroups.empty() || !mExcludeGroups.empty();
+
+        typename Attribute::Handle pHandle(mAttribute);
+
+        for (auto leaf = range.begin(); leaf; ++leaf) {
+
+            assert(leaf.pos() < mPointOffsets.size());
+
+            if (mInCoreOnly && leaf->buffer().isOutOfCore())    continue;
+
+            Index64 offset = mStartOffset;
+
+            if (leaf.pos() > 0) offset += mPointOffsets[leaf.pos() - 1];
+
+            const AttributeArray& array = leaf->constAttributeArray(mIndex);
+            typename HandleT::Ptr handle = HandleT::create(array);
+
+            const AttributeArray& offsetArray = leaf->constAttributeArray(mOffsetIndex);
+            auto offsetHandle = AttributeHandle<int>::create(offsetArray);
+
+            auto iter = leaf->beginIndexOn();
+
+            Index start = 0;
+            for (; iter; ++iter) {
+                if ((*iter) > 0)    start = offsetHandle->get(*iter - 1);
+                Index end = offsetHandle->get(*iter);
+                assert(end >= start);
+                pHandle.clear();
+                for (Index i = start; i < end; i++) {
+                    pHandle.push(handle->get(i));
+                }
+                pHandle.set(static_cast<Index>(offset));
+                offset++;
+            }
+        }
+    }
+
+    //////////
+
+    Attribute&                              mAttribute;
+    const std::vector<Index64>&             mPointOffsets;
+    const Index64                           mStartOffset;
+    const size_t                            mIndex;
+    const size_t                            mOffsetIndex;
+    const std::vector<std::string>&         mIncludeGroups;
+    const std::vector<std::string>&         mExcludeGroups;
+    const bool                              mInCoreOnly;
+}; // ConvertPointDataGridAttributeArrayOp
 
 template<typename PointDataTreeType, typename Group, typename FilterT>
 struct ConvertPointDataGridGroupOp {
@@ -771,6 +971,42 @@ populateAttribute(PointDataTreeT& tree, const PointIndexTreeT& pointIndexTree,
 ////////////////////////////////////////
 
 
+template <typename PointDataTreeT, typename PointIndexTreeT, typename PointArrayT>
+inline void
+populateAttributeArray(PointDataTreeT& tree, const PointIndexTreeT& pointIndexTree,
+    const openvdb::Name& attributeName, const openvdb::Name& offsetName, const PointArrayT& data)
+{
+    using point_conversion_internal::PopulateAttributeArrayOp;
+    using ValueType = typename PointArrayT::value_type;
+
+    auto iter = tree.cbeginLeaf();
+
+    if (!iter)  return;
+
+    const size_t attributeIndex = iter->attributeSet().find(attributeName);
+    const size_t offsetIndex = iter->attributeSet().find(offsetName);
+
+    if (attributeIndex == AttributeSet::INVALID_POS) {
+        OPENVDB_THROW(KeyError, "Attribute not found to populate - " << attributeName << ".");
+    }
+    if (offsetIndex == AttributeSet::INVALID_POS) {
+        OPENVDB_THROW(KeyError, "Offset Attribute not found to populate - " << offsetName << ".");
+    }
+
+    // populate attribute
+
+    typename tree::LeafManager<PointDataTreeT> leafManager(tree);
+
+    PopulateAttributeArrayOp<PointDataTreeT,
+                        PointIndexTreeT,
+                        PointArrayT> populate(pointIndexTree, data, attributeIndex, offsetIndex);
+    tbb::parallel_for(leafManager.leafRange(), populate);
+}
+
+
+////////////////////////////////////////
+
+
 template <typename PositionAttribute, typename PointDataGridT, typename FilterT>
 inline void
 convertPointDataGridPosition(   PositionAttribute& positionAttribute,
@@ -829,6 +1065,52 @@ convertPointDataGridAttribute(  TypedAttribute& attribute,
     ConvertPointDataGridAttributeOp<PointDataTreeT, TypedAttribute, FilterT> convert(
                         attribute, pointOffsets, startOffset, arrayIndex, stride,
                         filter, inCoreOnly);
+        tbb::parallel_for(leafManager.leafRange(), convert);
+    attribute.compact();
+}
+
+
+////////////////////////////////////////
+
+
+
+template <typename TypedAttribute, typename PointDataTreeT>
+inline void
+convertPointDataGridAttributeArray( TypedAttribute& attribute,
+                                    const PointDataTreeT& tree,
+                                    const std::vector<Index64>& pointOffsets,
+                                    const Index64 startOffset,
+                                    const size_t arrayIndex,
+                                    const size_t arrayOffset,
+                                    const Index stride,
+                                    const std::vector<Name>& includeGroups,
+                                    const std::vector<Name>& excludeGroups,
+                                    const bool inCoreOnly)
+{
+    using LeafManagerT = typename tree::LeafManager<const PointDataTreeT>;
+
+    using point_conversion_internal::ConvertPointDataGridAttributeArrayOp;
+
+    auto iter = tree.cbeginLeaf();
+
+    if (!iter)  return;
+
+    // for efficiency, keep only groups that are present in the Descriptor
+
+    const AttributeSet::Descriptor& descriptor = iter->attributeSet().descriptor();
+
+    std::vector<Name> newIncludeGroups(includeGroups);
+    std::vector<Name> newExcludeGroups(excludeGroups);
+
+    deleteMissingPointGroups(newIncludeGroups, descriptor);
+    deleteMissingPointGroups(newExcludeGroups, descriptor);
+
+    LeafManagerT leafManager(tree);
+
+    attribute.expand();
+    ConvertPointDataGridAttributeArrayOp<PointDataTreeT, TypedAttribute> convert(
+                        attribute, pointOffsets, startOffset, arrayIndex, arrayOffset,
+                        newIncludeGroups, newExcludeGroups, inCoreOnly);
         tbb::parallel_for(leafManager.leafRange(), convert);
     attribute.compact();
 }

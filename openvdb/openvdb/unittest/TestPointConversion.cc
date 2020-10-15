@@ -92,6 +92,58 @@ private:
 }; // struct AttributeWrapper
 
 
+// Attribute Array Wrapper
+template <typename T>
+struct AttributeArrayWrapper
+{
+    using ValueType     = T;
+    using PosType       = T;
+    using value_type    = T;
+
+    struct Handle
+    {
+        Handle(AttributeArrayWrapper<T>& attribute)
+            : mBuffer(attribute.mAttribute)
+            , mOffsets(attribute.mOffsets) { }
+
+        void setOffset(size_t n, openvdb::Index offset) {
+            mOffsets[n] = offset;
+        }
+
+        template <typename ValueType>
+        void set(size_t n, const ValueType& value) {
+            mBuffer[n] = static_cast<T>(value);
+        }
+
+    private:
+        std::vector<T>& mBuffer;
+        std::vector<int>& mOffsets;
+    }; // struct Handle
+
+    AttributeArrayWrapper() = default;
+
+    void expand() { }
+    void compact() { }
+
+    void resize(const size_t n) { mAttribute.resize(n); }
+    size_t size() { return mAttribute.size(); }
+
+    int size(const size_t n) const { return mOffsets[n]; }
+
+    std::vector<T>& buffer() { return mAttribute; }
+    std::vector<int>& offsets() { return mOffsets; }
+
+    template <typename ValueT>
+    void get(ValueT& value, size_t n, openvdb::Index m = 0) const { value = mAttribute[n * 1 + m]; }
+    template <typename ValueT>
+    void getPos(size_t n, ValueT& value) const { this->get<ValueT>(value, n); }
+
+private:
+    std::vector<T> mAttribute;
+    std::vector<int> mOffsets;
+}; // struct AttributeArrayWrapper
+
+
 struct GroupWrapper
 {
     GroupWrapper() = default;
@@ -134,7 +186,8 @@ genPoints(const int numPoints, const double scale, const bool stride,
     AttributeWrapper<int>& id,
     AttributeWrapper<float>& uniform,
     AttributeWrapper<openvdb::Name>& string,
-    GroupWrapper& group)
+    GroupWrapper& group,
+    AttributeArrayWrapper<float>* samples = nullptr)
 {
     // init
     openvdb::math::Random01 randNumber(0);
@@ -151,6 +204,18 @@ genPoints(const int numPoints, const double scale, const bool stride,
     uniform.resize(n*n);
     string.resize(n*n);
     group.resize(n*n);
+    if (samples) {
+        samples->resize(9);
+        if (numPoints > 10) {
+            samples->offsets().resize(numPoints);
+            for (int i = 0; i < samples->offsets().size(); i++) {
+                samples->offsets()[i] = 0;
+            }
+        }
+        else {
+            throw std::runtime_error("Expecting at least 1000 points when using samples");
+        }
+    }
 
     AttributeWrapper<Vec3f>::Handle positionHandle(position);
     AttributeWrapper<int>::Handle xyzHandle(xyz);
@@ -158,7 +223,14 @@ genPoints(const int numPoints, const double scale, const bool stride,
     AttributeWrapper<float>::Handle uniformHandle(uniform);
     AttributeWrapper<openvdb::Name>::Handle stringHandle(string);
 
+    std::unique_ptr<AttributeArrayWrapper<float>::Handle> samplesHandle = nullptr;
+
+    if (samples) {
+        samplesHandle.reset(new AttributeArrayWrapper<float>::Handle(*samples));
+    }
+
     int i = 0;
+    int sampleIndex = 0;
 
     // loop over a [0 to n) x [0 to n) grid.
     for (int a = 0; a < n; ++a) {
@@ -198,6 +270,25 @@ genPoints(const int numPoints, const double scale, const bool stride,
                 stringHandle.set(i, /*stride*/0, "testB");
             }
 
+            if (samplesHandle && i == 1) {
+                samplesHandle->setOffset(i, 3);
+                samplesHandle->set(sampleIndex++, 3);
+                samplesHandle->set(sampleIndex++, 4);
+                samplesHandle->set(sampleIndex++, 5);
+            }
+            else if (samplesHandle && i == 3) {
+                samplesHandle->setOffset(i, 1);
+                samplesHandle->set(sampleIndex++, 105);
+            }
+            else if (samplesHandle && i == 5) {
+                samplesHandle->setOffset(i, 5);
+                samplesHandle->set(sampleIndex++, 9);
+                samplesHandle->set(sampleIndex++, 4);
+                samplesHandle->set(sampleIndex++, 14);
+                samplesHandle->set(sampleIndex++, 18);
+                samplesHandle->set(sampleIndex++, 19);
+            }
+
             i++;
         }
     }
@@ -212,7 +303,7 @@ TestPointConversion::testPointConversion()
 {
     // generate points
 
-    const size_t count(1000000);
+    const size_t count(16);
 
     AttributeWrapper<Vec3f> position(1);
     AttributeWrapper<int> xyz(1);
@@ -220,9 +311,10 @@ TestPointConversion::testPointConversion()
     AttributeWrapper<float> uniform(1);
     AttributeWrapper<openvdb::Name> string(1);
     GroupWrapper group;
+    AttributeArrayWrapper<float> samples;
 
-    genPoints(count, /*scale=*/ 100.0, /*stride=*/false,
-                position, xyz, id, uniform, string, group);
+    genPoints(count, /*scale=*/ 1.0, /*stride=*/false,
+                position, xyz, id, uniform, string, group, &samples);
 
     CPPUNIT_ASSERT_EQUAL(position.size(), count);
     CPPUNIT_ASSERT_EQUAL(id.size(), count);
@@ -271,6 +363,18 @@ TestPointConversion::testPointConversion()
     appendGroup(tree, "test");
     setGroup(tree, indexTree, group.buffer(), "test");
 
+    // add samples, offset:samples and populate
+
+    const openvdb::Name offsetName = "offset:samples";
+
+    appendAttribute<float>(tree, "samples", /*zeroVal=*/0.0f,
+        /*size=*/samples.size(), /*constantStride=*/false);
+    appendAttribute<int>(tree, offsetName, /*zeroVal=*/0,
+        /*stride=*/1, /*constantStride=*/true);
+
+    populateAttributeArray<PointDataTree, tools::PointIndexTree, AttributeArrayWrapper<float>>(
+        tree, indexTree, "samples", offsetName, samples);
+
     CPPUNIT_ASSERT_EQUAL(indexTree.leafCount(), tree.leafCount());
 
     // read/write grid to a temp file
@@ -315,18 +419,21 @@ TestPointConversion::testPointConversion()
 
     PointDataTree::LeafCIter leafCIter = inputTree.cbeginLeaf();
 
-    CPPUNIT_ASSERT_EQUAL(5, int(leafCIter->attributeSet().size()));
+    CPPUNIT_ASSERT_EQUAL(7, int(leafCIter->attributeSet().size()));
 
     CPPUNIT_ASSERT(leafCIter->attributeSet().find("id") != AttributeSet::INVALID_POS);
     CPPUNIT_ASSERT(leafCIter->attributeSet().find("uniform") != AttributeSet::INVALID_POS);
     CPPUNIT_ASSERT(leafCIter->attributeSet().find("P") != AttributeSet::INVALID_POS);
     CPPUNIT_ASSERT(leafCIter->attributeSet().find("string") != AttributeSet::INVALID_POS);
+    CPPUNIT_ASSERT(leafCIter->attributeSet().find("samples") != AttributeSet::INVALID_POS);
+    CPPUNIT_ASSERT(leafCIter->attributeSet().find("offset:samples") != AttributeSet::INVALID_POS);
 
     const auto idIndex = static_cast<Index>(leafCIter->attributeSet().find("id"));
     const auto uniformIndex = static_cast<Index>(leafCIter->attributeSet().find("uniform"));
     const auto stringIndex = static_cast<Index>(leafCIter->attributeSet().find("string"));
     const AttributeSet::Descriptor::GroupIndex groupIndex =
         leafCIter->attributeSet().groupIndex("test");
+    const auto samplesIndex = static_cast<Index>(leafCIter->attributeSet().find("samples"));
 
     // convert back into linear point attribute data
 
