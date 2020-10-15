@@ -18,6 +18,7 @@
 #include <GA/GA_AIFTuple.h>
 #include <GA/GA_ElementGroup.h>
 #include <GA/GA_Iterator.h>
+#include <GU/GU_PrimNURBCurve.h>
 
 #include <CH/CH_Manager.h> // for CHgetEvalTime
 #include <PRM/PRM_SpareData.h>
@@ -373,14 +374,90 @@ private:
 }; // struct HoudiniWriteAttribute
 
 
+template <typename T>
+struct HoudiniReadAttributeArray
+{
+    typedef T value_type;
+    typedef T PosType;
+
+    explicit HoudiniReadAttributeArray(const std::vector<T>& values,
+        hvdb::OffsetListPtr offsets = hvdb::OffsetListPtr())
+        : mValues(values)
+        , mOffsets(offsets) { }
+
+    // Return the value of the nth point in the array (scalar type only)
+    void get(T& value, const size_t n, const openvdb::Index component = 0) const
+    {
+        value = mValues[n];
+    }
+
+    // Only provided to match the required interface for the PointPartitioner
+    void getPos(size_t n, T& xyz) const { return this->get(xyz, n); }
+
+    size_t size() const
+    {
+        return mOffsets ? mOffsets->size() : mValues.size();
+    }
+
+private:
+    const std::vector<T>&  mValues;
+    hvdb::OffsetListPtr    mOffsets;
+}; // struct HoudiniReadAttributeArray
+
+
+/// @brief Writeable wrapper class around Houdini point attributes which hold
+/// a reference to the GA Attribute to write
+template <typename T>
+struct HoudiniWriteAttributeArray
+{
+    using ValueType = T;
+
+    struct Handle
+    {
+        explicit Handle(HoudiniWriteAttributeArray<T>& attribute)
+            : mHandle(&attribute.mAttribute) { }
+
+        void clear() {
+            mData.clear();
+        }
+
+        void push(const T value) {
+            mData.append(value);
+        }
+
+        void set(openvdb::Index offset) {
+            writeAttributeArrayValue(mHandle, GA_Offset(offset), mData);
+        }
+
+    private:
+        typename GAHandleTraits<T>::ARW mHandle;
+        UT_ValArray<T> mData;
+    }; // struct Handle
+
+    explicit HoudiniWriteAttributeArray(GA_Attribute& attribute)
+        : mAttribute(attribute) { }
+
+    void expand() {
+        mAttribute.hardenAllPages();
+    }
+
+    void compact() {
+        mAttribute.tryCompressAllPages();
+    }
+
+private:
+    GA_Attribute& mAttribute;
+}; // struct HoudiniWriteAttributeArray
+
+
 /// @brief Readable wrapper class around Houdini point attributes which hold
 /// a reference to the GA Attribute to access and optionally a list of offsets
 template <typename T>
 struct HoudiniReadAttribute
 {
-    using value_type = T;
-    using PosType = T;
-    using ReadHandleType = typename GAHandleTraits<T>::RO;
+    typedef T value_type;
+    typedef T PosType;
+    typedef typename GAHandleTraits<T>::RO ReadHandleType;
 
     explicit HoudiniReadAttribute(const GA_Attribute& attribute,
         hvdb::OffsetListPtr offsets = hvdb::OffsetListPtr())
@@ -388,7 +465,7 @@ struct HoudiniReadAttribute
         , mAttribute(attribute)
         , mOffsets(offsets) { }
 
-    static void get(const GA_Attribute& attribute, T& value, const GA_Offset offset,
+    static void get(const GA_Attribute& attribute, T& value, const size_t offset,
         const openvdb::Index component)
     {
         const ReadHandleType handle(&attribute);
@@ -416,8 +493,47 @@ private:
 
     const ReadHandleType   mHandle;
     const GA_Attribute&    mAttribute;
-    hvdb::OffsetListPtr          mOffsets;
-}; // HoudiniReadAttribute
+    hvdb::OffsetListPtr    mOffsets;
+}; // struct HoudiniReadAttribute
+
+
+template <typename T>
+struct HoudiniOffsetAttribute
+{
+    using value_type = T;
+    using PosType = T;
+    typedef typename GAHandleTraits<T>::RO ReadHandleType;
+
+    HoudiniOffsetAttribute(const GA_Attribute& attribute, hvdb::OffsetPairListPtr offsetPairs, openvdb::Index stride,
+                           const openvdb::math::Transform& transform)
+        : mAttribute(attribute)
+        , mHandle(&attribute)
+        , mOffsetPairs(offsetPairs)
+        , mStride(stride)
+        , mTransform(transform) { }
+
+    template <typename ValueType>
+    void get(ValueType& value, size_t n, openvdb::Index offset = 0) const
+    {
+        const hvdb::OffsetPair& pair = (*mOffsetPairs)[n * mStride + offset];
+
+        GA_Offset offset1(pair.first);
+        GA_Offset offset2(pair.second);
+
+        value = mTransform.worldToIndex(readAttributeValue<ReadHandleType, ValueType>(mHandle, offset2));
+        value -= mTransform.worldToIndex(readAttributeValue<ReadHandleType, ValueType>(mHandle, offset1));
+    }
+
+    size_t size() const { return mOffsetPairs->size(); }
+    openvdb::Index stride() const { return mStride; }
+
+private:
+    const ReadHandleType mHandle;
+    const GA_Attribute& mAttribute;
+    hvdb::OffsetPairListPtr mOffsetPairs;
+    openvdb::Index mStride;
+    openvdb::math::Transform mTransform;
+}; // struct HoudiniOffsetAttribute
 
 
 struct HoudiniGroup
@@ -452,6 +568,20 @@ private:
     // This is not a bit field as we need to allow threadsafe updates:
     std::vector<unsigned char> mBackingArray;
 }; // HoudiniGroup
+
+
+template <typename ValueType, typename HoudiniOffsetAttribute>
+void
+convertSegmentsFromHoudini( PointDataTree& tree, const tools::PointIndexTree& indexTree, const openvdb::Name& name,
+                            const size_t count, HoudiniOffsetAttribute& houdiniOffsets)
+{
+    static_assert(!std::is_base_of<AttributeArray, ValueType>::value, "ValueType must not be derived from AttributeArray");
+    static_assert(!std::is_same<ValueType, openvdb::Name>::value, "ValueType must not be openvdb::Name/std::string");
+
+    appendAttribute<ValueType>(tree, name, zeroVal<ValueType>(), count);
+
+    populateAttribute<PointDataTree, tools::PointIndexTree, HoudiniOffsetAttribute>(tree, indexTree, name, houdiniOffsets, count);
+}
 
 
 template <typename ValueType, typename CodecType = NullCodec>
@@ -899,23 +1029,43 @@ convertHoudiniToPointDataGrid(const GU_Detail& ptGeo,
                               const WarnFunc& warnings)
 {
     using HoudiniPositionAttribute = HoudiniReadAttribute<Vec3d>;
+    using HoudiniOffsetAttribute = HoudiniOffsetAttribute<Vec3f>;
+    using HoudiniOrderAttribute = HoudiniReadAttribute<int>;
 
     // initialize primitive offsets
 
     hvdb::OffsetListPtr offsets;
+    hvdb::OffsetPairListPtr offsetPairs;
+
+    std::vector<int> curveOrders;
+
+    size_t vertexCount = 0;
 
     for (GA_Iterator primitiveIt(ptGeo.getPrimitiveRange()); !primitiveIt.atEnd(); ++primitiveIt) {
         const GA_Primitive* primitive = ptGeo.getPrimitiveList().get(*primitiveIt);
 
         if (primitive->getTypeId() != GA_PRIMNURBCURVE) continue;
 
-        const size_t vertexCount = primitive->getVertexCount();
-        if (vertexCount == 0) continue;
+        vertexCount = primitive->getVertexCount();
 
-        if (!offsets) offsets.reset(new hvdb::OffsetList);
+        if (vertexCount == 0)  continue;
 
-        const GA_Offset firstOffset = primitive->getPointOffset(0);
+        const GEO_Curve* curvePrimitive(static_cast<const GEO_Curve*>(primitive));
+        curveOrders.push_back(curvePrimitive->getOrder());
+
+        if (!offsets)   offsets.reset(new hvdb::OffsetList);
+
+        GA_Offset firstOffset = primitive->getPointOffset(0);
         offsets->push_back(firstOffset);
+
+        if (vertexCount > 1) {
+            if (!offsetPairs)   offsetPairs.reset(new hvdb::OffsetPairList);
+
+            for (size_t i = 1; i < vertexCount; i++) {
+                GA_Offset offset = primitive->getPointOffset(i);
+                offsetPairs->push_back(hvdb::OffsetPair(firstOffset, offset));
+            }
+        }
     }
 
     // Create PointPartitioner compatible P attribute wrapper (for now no offset filtering)
@@ -1018,6 +1168,23 @@ convertHoudiniToPointDataGrid(const GU_Detail& ptGeo,
         }
     }
 
+    // Add curve segments to PointDataGrid
+
+    if (offsetPairs) {
+
+        HoudiniOffsetAttribute segments(positionAttribute, offsetPairs, vertexCount-1, transform);
+
+        convertSegmentsFromHoudini<Vec3f, HoudiniOffsetAttribute>(tree, indexTree, "segments", vertexCount-1, segments);
+
+        MetaMap& metadata = makeDescriptorUnique(tree)->getMetadata();
+        metadata.insertMeta("nurbscurve", StringMetadata("segments"));
+
+        appendAttribute<int>(tree, "order", 0);
+
+        HoudiniReadAttributeArray<int> orderAttribute(curveOrders, offsets);
+        populateAttribute<PointDataTree, tools::PointIndexTree, HoudiniReadAttributeArray<int> >(tree, indexTree, "order", orderAttribute);
+    }
+
     // Add other attributes to PointDataGrid
 
     for (const auto& attrInfo : attributes)
@@ -1103,7 +1270,7 @@ convertPointDataGridToHoudini(
 
     HoudiniWriteAttribute<Vec3f> positionAttribute(*detail.getP());
     convertPointDataGridPosition(positionAttribute, grid, offsets, startOffset,
-        filter, inCoreOnly);
+        filter, /*curves=*/true, inCoreOnly);
 
     // add other point attributes to the hdk detail
     const AttributeSet::Descriptor::NameToPosMap& nameToPosMap = descriptor.map();
@@ -1290,6 +1457,13 @@ convertPointDataGridToHoudini(
         HoudiniGroup group(*pointGroup, startOffset, total);
         convertPointDataGridGroup(group, tree, offsets, startOffset, index, filter, inCoreOnly);
     }
+
+    GU_PrimNURBCurve* curve = GU_PrimNURBCurve::build(&detail, 4, /*order=*/4, /*closed=*/0, /*interpEnds=*/1, /*appendPoints=*/0);
+
+    curve->setVertexPoint(0, GA_Offset(0));
+    curve->setVertexPoint(1, GA_Offset(1));
+    curve->setVertexPoint(2, GA_Offset(2));
+    curve->setVertexPoint(3, GA_Offset(3));
 }
 
 

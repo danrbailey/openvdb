@@ -19,6 +19,7 @@
 #include <houdini_utils/geometry.h>
 #include <houdini_utils/ParmFactory.h>
 
+#include <GEO/GEO_Curve.h>
 #include <CH/CH_Manager.h> // for CHgetEvalTime
 #include <GU/GU_DetailHandle.h>
 #include <GU/GU_PackedContext.h>
