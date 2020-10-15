@@ -534,8 +534,6 @@ TestAttributeSet::testAttributeSet()
         CPPUNIT_ASSERT_THROW(invalidAttrSetA.appendAttribute("id", AttributeI::attributeType(),
             /*stride=*/0, /*constantStride=*/true), openvdb::ValueError);
         CPPUNIT_ASSERT(invalidAttrSetA.find("id") == AttributeSet::INVALID_POS);
-        CPPUNIT_ASSERT_THROW(invalidAttrSetA.appendAttribute("id", AttributeI::attributeType(),
-            /*stride=*/49, /*constantStride=*/false), openvdb::ValueError);
         CPPUNIT_ASSERT_NO_THROW(
             invalidAttrSetA.appendAttribute("testStride1", AttributeI::attributeType(),
             /*stride=*/50, /*constantStride=*/false));

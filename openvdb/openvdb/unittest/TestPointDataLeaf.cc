@@ -551,8 +551,8 @@ TestPointDataLeaf::testAttributes()
     const AttributeArray* array0 = leaf.attributeSet().get(/*pos=*/0);
     const AttributeArray* array1 = leaf.attributeSet().get(/*pos=*/1);
 
-    CPPUNIT_ASSERT_EQUAL(array0->size(), Index(1));
-    CPPUNIT_ASSERT_EQUAL(array1->size(), Index(1));
+    CPPUNIT_ASSERT_EQUAL(array0->size(), Index(0));
+    CPPUNIT_ASSERT_EQUAL(array1->size(), Index(0));
 
     // test leaf returns expected result for hasAttribute()
 
