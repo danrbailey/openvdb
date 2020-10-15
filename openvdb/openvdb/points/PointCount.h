@@ -44,6 +44,7 @@ inline Index64 pointCount(  const PointDataTreeT& tree,
 /// @param tree             the PointDataTree from which to populate the offsets
 /// @param filter           an optional index filter
 /// @param inCoreOnly       if true, points in out-of-core leaf nodes are ignored
+/// @param curves           if true, use curves
 /// @param threaded         enable or disable threading  (threading is enabled by default)
 /// @return The final cumulative point offset.
 template <typename PointDataTreeT, typename FilterT = NullFilter>
@@ -51,6 +52,7 @@ inline Index64 pointOffsets(std::vector<Index64>& pointOffsets,
                             const PointDataTreeT& tree,
                             const FilterT& filter = NullFilter(),
                             const bool inCoreOnly = false,
+                            const bool curves = true,
                             const bool threaded = true);
 
 
@@ -123,6 +125,7 @@ Index64 pointOffsets(   std::vector<Index64>& pointOffsets,
                         const PointDataTreeT& tree,
                         const FilterT& filter,
                         const bool inCoreOnly,
+                        const bool curves,
                         const bool threaded)
 {
     using LeafT = typename PointDataTreeT::LeafNodeType;
@@ -132,17 +135,32 @@ Index64 pointOffsets(   std::vector<Index64>& pointOffsets,
 
     pointOffsets.assign(tree.leafCount(), Index64(0));
 
+    LeafManagerT leafManager(tree);
+
+    size_t segmentsIndex = AttributeSet::INVALID_POS;
+    const AttributeSet::Descriptor& descriptor = leafManager.leaf(0).attributeSet().descriptor();
+    const MetaMap& metadata = descriptor.getMetadata();
+    StringMetadata::ConstPtr segmentsMetadata =
+            metadata.getMetadata<StringMetadata>("nurbscurve");
+
+    if (segmentsMetadata) {
+        segmentsIndex = descriptor.find(segmentsMetadata->value());
+    }
+
     // compute total points per-leaf
 
-    LeafManagerT leafManager(tree);
     leafManager.foreach(
-        [&pointOffsets, &filter, &inCoreOnly](const LeafT& leaf, size_t pos) {
+        [&](const LeafT& leaf, size_t pos) {
             if (inCoreOnly && leaf.buffer().isOutOfCore())  return;
+            size_t stride = 1;
+            if (segmentsIndex != AttributeSet::INVALID_POS) {
+                stride += leaf.constAttributeArray(segmentsIndex).stride();
+            }
             auto state = filter.state(leaf);
             if (state == index::ALL) {
-                pointOffsets[pos] = leaf.pointCount();
+                pointOffsets[pos] = leaf.pointCount() * stride;
             } else if (state != index::NONE) {
-                pointOffsets[pos] = iterCount(leaf.beginIndexAll(filter));
+                pointOffsets[pos] = iterCount(leaf.beginIndexAll(filter)) * stride;
             }
         },
     threaded);
