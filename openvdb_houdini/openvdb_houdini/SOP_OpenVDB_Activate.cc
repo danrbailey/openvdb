@@ -411,7 +411,11 @@ sopDoPrune(GridType &grid, bool doprune, double tolerance)
         OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
         const auto value = openvdb::zeroVal<ValueT>() + tolerance;
         OPENVDB_NO_TYPE_CONVERSION_WARNING_END
-        grid.tree().prune(static_cast<ValueT>(value));
+        if (grid.getGridClass() == GRID_LEVEL_SET) {
+            openvdb::tools::pruneLevelSet(grid.tree());
+        } else {
+            openvdb::tools::prune(grid.tree(), static_cast<ValueT>(value));
+        }
     }
 }
 
