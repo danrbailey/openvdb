@@ -1,0 +1,4 @@
+
+    Houdini:
+    - VDB Activate now uses the multi-threaded tools::prune for much faster
+      performance.
