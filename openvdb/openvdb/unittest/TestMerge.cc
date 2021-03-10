@@ -7,8 +7,6 @@
 
 #include <openvdb/tools/Merge.h>
 
-#include <openvdb/tools/Composite.h>
-
 using namespace openvdb;
 
 class TestMerge: public ::testing::Test
@@ -76,7 +74,6 @@ auto hasOnlyInactiveNegativeBackgroundTiles = [](const auto& node) -> bool
 } // namespace
 
 
-#if 0
 TEST_F(TestMerge, testTreeToMerge)
 {
     using RootChildNode = FloatTree::RootNodeType::ChildNodeType;
@@ -2570,9 +2567,7 @@ TEST_F(TestMerge, testCsgDifference)
         EXPECT_EQ(Index32(1), grid2->tree().leafCount());
     }
 }
-#endif
 
-// #define COMPOSITE
 
 TEST_F(TestMerge, testSum)
 {
@@ -2639,13 +2634,9 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(1), getActiveTileCount(root2));
         EXPECT_EQ(Index(1), getInactiveTileCount(root2));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         // background tiles are not erased
         EXPECT_EQ(Index(2), tree.root().getTableSize());
@@ -2657,13 +2648,9 @@ TEST_F(TestMerge, testSum)
         tree2.root().addTile(Coord(8192, 0, 0), 2.2f, true);
         EXPECT_EQ(Index(2), getTileCount(tree2.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         EXPECT_EQ(Index(2), tree.root().getTableSize());
         EXPECT_EQ(Index(1), getActiveTileCount(tree.root()));
@@ -2679,13 +2666,9 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(1), getTileCount(tree.root()));
         EXPECT_EQ(Index(2), getTileCount(tree2.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         EXPECT_EQ(Index(3), root.getTableSize());
@@ -2712,13 +2695,9 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(2), getTileCount(tree.root()));
         EXPECT_EQ(Index(2), getTileCount(tree2.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         EXPECT_EQ(Index(1), getActiveTileCount(root));
@@ -2740,13 +2719,9 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(2), getTileCount(tree.root()));
         EXPECT_EQ(Index(2), getTileCount(tree2.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         EXPECT_EQ(Index(2), getActiveTileCount(root));
@@ -2771,15 +2746,10 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(2), getTileCount(tree2.root()));
         EXPECT_EQ(Index(3), getTileCount(tree3.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-        tools::compSum(tree, tree3);
-#else
         std::vector<FloatTree*> trees{&tree2, &tree3};
         tools::SumMergeOp<FloatTree> mergeOp(trees, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         auto iter = root.cbeginValueAll();
@@ -2813,13 +2783,9 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(3), getChildCount(tree.root()));
         EXPECT_EQ(Index(3), getChildCount(tree2.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         EXPECT_EQ(Index(6), getChildCount(root));
@@ -2858,13 +2824,9 @@ TEST_F(TestMerge, testSum)
         EXPECT_EQ(Index(3), getChildCount(tree.root()));
         EXPECT_EQ(Index(3), getChildCount(tree2.root()));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         EXPECT_EQ(Index(3), getChildCount(root));
@@ -2893,13 +2855,9 @@ TEST_F(TestMerge, testSum)
         child->addTile(2, 6.6f, true);
         tree2.root().addChild(child);
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         const auto& root = tree.root();
         EXPECT_EQ(Index(1), getChildCount(root));
@@ -2924,13 +2882,9 @@ TEST_F(TestMerge, testSum)
             auto* leaf = tree2.touchLeaf(Coord(0, 0, 0));
             leaf->setValueOnly(10, -2.3f);
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-#else
             tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
             tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             EXPECT_EQ(Index32(1), tree.leafCount());
             EXPECT_EQ(tree.cbeginLeaf()->getFirstValue(), 0.0f);
@@ -2943,13 +2897,9 @@ TEST_F(TestMerge, testSum)
             leaf->setValueOnly(10, -2.3f);
             leaf->setValueOn(11, 1.5f);
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-#else
             tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
             tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             EXPECT_EQ(Index32(1), tree.leafCount());
             EXPECT_EQ(Index(0), getTileCount(tree.root()));
@@ -2969,13 +2919,9 @@ TEST_F(TestMerge, testSum)
             leaf->setValueOn(11, 1.5f);
             tree2.root().addTile(Coord(0, 0, 0), 10.0f, false);
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-#else
             tools::SumMergeOp<FloatTree> mergeOp(tree2, DeepCopy());
             tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             EXPECT_EQ(Index32(1), tree.leafCount());
             EXPECT_EQ(Index(0), getTileCount(tree.root()));
@@ -2995,13 +2941,9 @@ TEST_F(TestMerge, testSum)
             leaf->setValueOn(11, 1.5f);
             tree2.root().addChild(new RootChildType(Coord(0, 0, 0), 10.0f, true));
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-#else
             tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
             tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             EXPECT_EQ(Index32(1), tree.leafCount());
             EXPECT_EQ(Index(0), getTileCount(tree.root()));
@@ -3021,13 +2963,9 @@ TEST_F(TestMerge, testSum)
             leaf->setValueOn(11, 1.5f);
             tree2.root().setBackground(10.0f, /*updateChildNodes=*/false);
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-#else
             tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
             tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             EXPECT_EQ(Index32(1), tree.leafCount());
             EXPECT_EQ(Index(0), getTileCount(tree.root()));
@@ -3047,13 +2985,9 @@ TEST_F(TestMerge, testSum)
             auto* leaf = tree2.touchLeaf(Coord(0, 0, 0));
             leaf->setValueOnly(10, -2.3f);
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-#else
             tools::SumMergeOp<FloatTree> mergeOp(tree2, Steal());
             tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             const auto* testLeaf = tree.probeConstLeaf(Coord(0, 0, 0));
             EXPECT_EQ(-2.3f, testLeaf->getValue(10));
@@ -3082,15 +3016,10 @@ TEST_F(TestMerge, testSum)
             leaf2->setValueOnly(9, 0.1);
             leaf3->setValueOnly(9, 0.2);
 
-#ifdef COMPOSITE
-            tools::compSum(tree, tree2);
-            tools::compSum(tree, tree3);
-#else
             std::vector<DoubleTree*> trees{&tree2, &tree3};
             tools::SumMergeOp<DoubleTree> mergeOp(trees, Steal());
             tree::DynamicNodeManager<DoubleTree, 3> nodeManager(tree);
             nodeManager.foreachTopDown(mergeOp);
-#endif
 
             // non-associativity of floating-point addition
             EXPECT_NE(0.7 + 0.2 + 0.1, 0.7 + 0.1 + 0.2);
@@ -3138,13 +3067,9 @@ TEST_F(TestMerge, testSum)
         leaf->setValueOnly(10, Vec3s(0.1f, 0.2f, 0.3f));
         leaf->setValueOn(11, Vec3s(0.4f, 0.5f, 0.6f));
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<Vec3STree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<Vec3STree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         EXPECT_EQ(Index32(1), tree.leafCount());
         EXPECT_EQ(Index(0), getTileCount(tree.root()));
@@ -3163,13 +3088,9 @@ TEST_F(TestMerge, testSum)
         auto* leaf = tree2.touchLeaf(Coord(0, 0, 0));
         leaf->setValueOnly(10, true);
 
-#ifdef COMPOSITE
-        tools::compSum(tree, tree2);
-#else
         tools::SumMergeOp<MaskTree> mergeOp(tree2, Steal());
         tree::DynamicNodeManager<MaskTree, 3> nodeManager(tree);
         nodeManager.foreachTopDown(mergeOp);
-#endif
 
         EXPECT_EQ(Index32(1), tree.leafCount());
         EXPECT_EQ(Index(0), getTileCount(tree.root()));
