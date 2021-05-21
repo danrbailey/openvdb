@@ -1,316 +1,1117 @@
-// Copyright Contributors to the OpenVDB Project
-// SPDX-License-Identifier: MPL-2.0
 
-#include <algorithm>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
 #include <openvdb/openvdb.h>
-#include <openvdb/util/logging.h>
 
+#include <openvdb/util/CpuTimer.h>
 
-namespace {
+#include <openvdb/tools/ValueTransformer.h>
+#include <openvdb/tree/LeafManager.h>
 
-using StringVec = std::vector<std::string>;
+#include <tbb/global_control.h>
 
-const char* INDENT = "   ";
-const char* gProgName = "";
+using namespace openvdb;
 
-void
-usage [[noreturn]] (int exitStatus = EXIT_FAILURE)
+struct DoubleOp
 {
-    std::cerr <<
-"Usage: " << gProgName << " in.vdb [in.vdb ...] [options]\n" <<
-"Which: prints information about OpenVDB grids\n" <<
-"Options:\n" <<
-"    -l, -stats     long printout, including grid statistics\n" <<
-"    -m, -metadata  print per-file and per-grid metadata\n" <<
-"    -version       print version information\n";
-    exit(exitStatus);
-}
+    template <typename T>
+    bool operator()(T&, size_t = 0) const { return true; }
 
-
-std::string
-sizeAsString(openvdb::Index64 n, const std::string& units)
-{
-    std::ostringstream ostr;
-    ostr << std::setprecision(3);
-    if (n < 1000) {
-        ostr << n;
-    } else if (n < 1000000) {
-        ostr << (double(n) / 1.0e3) << "K";
-    } else if (n < 1000000000) {
-        ostr << (double(n) / 1.0e6) << "M";
-    } else {
-        ostr << (double(n) / 1.0e9) << "G";
+    bool operator()(FloatTree::LeafNodeType& leaf, size_t idx = 0) const
+    {
+        for (auto iter = leaf.beginValueOn(); iter; ++iter) {
+            iter.setValue(iter.getValue() * 2);
+        }
+        return true;
     }
-    ostr << units;
-    return ostr.str();
-}
-
-
-std::string
-bytesAsString(openvdb::Index64 n)
-{
-    std::ostringstream ostr;
-    ostr << std::setprecision(3);
-    if (n >> 30) {
-        ostr << (double(n) / double(uint64_t(1) << 30)) << "GB";
-    } else if (n >> 20) {
-        ostr << (double(n) / double(uint64_t(1) << 20)) << "MB";
-    } else if (n >> 10) {
-        ostr << (double(n) / double(uint64_t(1) << 10)) << "KB";
-    } else {
-        ostr << n << "B";
-    }
-    return ostr.str();
-}
-
-
-std::string
-coordAsString(const openvdb::Coord ijk, const std::string& sep,
-              const std::string& start, const std::string& stop)
-{
-    std::ostringstream ostr;
-    ostr << start << ijk[0] << sep << ijk[1] << sep << ijk[2] << stop;
-    return ostr.str();
-}
-
-
-std::string
-bkgdValueAsString(const openvdb::GridBase::ConstPtr& grid)
-{
-    std::ostringstream ostr;
-    if (grid) {
-        const openvdb::TreeBase& tree = grid->baseTree();
-        ostr << "background: ";
-        openvdb::Metadata::Ptr background = tree.getBackgroundValue();
-        if (background) ostr << background->str();
-    }
-    return ostr.str();
-}
-
-
-/// Print detailed information about the given VDB files.
-/// If @a metadata is true, include file-level metadata key, value pairs.
-void
-printLongListing(const StringVec& filenames)
-{
-    bool oneFile = (filenames.size() == 1), firstFile = true;
-
-    for (size_t i = 0, N = filenames.size(); i < N; ++i, firstFile = false) {
-        openvdb::io::File file(filenames[i]);
-        std::string version;
-        openvdb::GridPtrVecPtr grids;
-        openvdb::MetaMap::Ptr meta;
-        try {
-            file.open();
-            grids = file.getGrids();
-            meta = file.getMetadata();
-            version = file.version();
-            file.close();
-        } catch (openvdb::Exception& e) {
-            OPENVDB_LOG_ERROR(e.what() << " (" << filenames[i] << ")");
-        }
-        if (!grids) continue;
-
-        if (!oneFile) {
-            if (!firstFile) {
-                std::cout << "\n" << std::string(40, '-') << "\n\n";
-            }
-            std::cout << filenames[i] << "\n\n";
-        }
-
-        // Print file-level metadata.
-        std::cout << "VDB version: " << version << "\n";
-        if (meta) {
-            std::string str = meta->str();
-            if (!str.empty()) std::cout << str << "\n";
-        }
-        std::cout << "\n";
-
-        // For each grid in the file...
-        bool firstGrid = true;
-        for (openvdb::GridPtrVec::const_iterator it = grids->begin(); it != grids->end(); ++it) {
-            if (openvdb::GridBase::ConstPtr grid = *it) {
-                if (!firstGrid) std::cout << "\n\n";
-                std::cout << "Name: " << grid->getName() << std::endl;
-                grid->print(std::cout, /*verboseLevel=*/11);
-                firstGrid = false;
-            }
-        }
-    }
-}
-
-
-/// Print condensed information about the given VDB files.
-/// If @a metadata is true, include file- and grid-level metadata.
-void
-printShortListing(const StringVec& filenames, bool metadata)
-{
-    bool oneFile = (filenames.size() == 1), firstFile = true;
-
-    for (size_t i = 0, N = filenames.size(); i < N; ++i, firstFile = false) {
-        const std::string
-            indent(oneFile ? "": INDENT),
-            indent2(indent + INDENT);
-
-        if (!oneFile) {
-            if (metadata && !firstFile) std::cout << "\n";
-            std::cout << filenames[i] << ":\n";
-        }
-
-        openvdb::GridPtrVecPtr grids;
-        openvdb::MetaMap::Ptr meta;
-
-        openvdb::io::File file(filenames[i]);
-        try {
-            file.open();
-            grids = file.getGrids();
-            meta = file.getMetadata();
-            file.close();
-        } catch (openvdb::Exception& e) {
-            OPENVDB_LOG_ERROR(e.what() << " (" << filenames[i] << ")");
-        }
-        if (!grids) continue;
-
-        if (metadata) {
-            // Print file-level metadata.
-            std::string str = meta->str(indent);
-            if (!str.empty()) std::cout << str << "\n";
-        }
-
-        // For each grid in the file...
-        for (openvdb::GridPtrVec::const_iterator it = grids->begin(); it != grids->end(); ++it) {
-            const openvdb::GridBase::ConstPtr grid = *it;
-            if (!grid) continue;
-
-            // Print the grid name and its voxel value datatype.
-            std::cout << indent << std::left << std::setw(11) << grid->getName()
-                << " " << std::right << std::setw(6) << grid->valueType();
-
-            // Print the grid's bounding box and dimensions.
-            openvdb::CoordBBox bbox = grid->evalActiveVoxelBoundingBox();
-            std::string
-                boxStr = coordAsString(bbox.min(), ",", "(", ")") + "->" +
-                         coordAsString(bbox.max(), ",", "(", ")"),
-                dimStr = coordAsString(bbox.extents(), "x", "", "");
-            boxStr += std::string(
-                std::max(1, int(40 - boxStr.size() - dimStr.size())), ' ') + dimStr;
-            std::cout << " " << std::left << std::setw(40) << boxStr;
-
-            // Print the number of active voxels.
-            std::cout << "  " << std::right << std::setw(8)
-                << sizeAsString(grid->activeVoxelCount(), "Vox");
-
-            // Print the grid's in-core size, in bytes.
-            std::cout << " " << std::right << std::setw(6) << bytesAsString(grid->memUsage());
-
-            std::cout << std::endl;
-
-            // Print grid-specific metadata.
-            if (metadata) {
-                // Print background value.
-                std::string str = bkgdValueAsString(grid);
-                if (!str.empty()) {
-                    std::cout << indent2 << str << "\n";
-                }
-                // Print local and world transforms.
-                grid->transform().print(std::cout, indent2);
-                // Print custom metadata.
-                str = grid->str(indent2);
-                if (!str.empty()) std::cout << str << "\n";
-                std::cout << std::flush;
-            }
-        }
-    }
-}
-
-} // unnamed namespace
-
+};
 
 int
 main(int argc, char *argv[])
 {
-    OPENVDB_START_THREADSAFE_STATIC_WRITE
-    gProgName = argv[0];
-    if (const char* ptr = ::strrchr(gProgName, '/')) gProgName = ptr + 1;
-    OPENVDB_FINISH_THREADSAFE_STATIC_WRITE
+    openvdb::initialize();
 
-    int exitStatus = EXIT_SUCCESS;
+    util::CpuTimer timer;
 
-    if (argc == 1) usage();
+    size_t count = 100*1000*1000;
 
-    openvdb::logging::initialize(argc, argv);
+    std::vector<Coord> ijks;
+    ijks.reserve(count*8);
 
-    bool stats = false, metadata = false, version = false;
-    StringVec filenames;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg[0] == '-') {
-            if (arg == "-m" || arg == "-metadata") {
-                metadata = true;
-            } else if (arg == "-l" || arg == "-stats") {
-                stats = true;
-            } else if (arg == "-h" || arg == "-help" || arg == "--help") {
-                usage(EXIT_SUCCESS);
-            } else if (arg == "-version" || arg == "--version") {
-                version = true;
-            } else {
-                OPENVDB_LOG_FATAL("\"" << arg << "\" is not a valid option");
-                usage();
+    auto openCloud = [&]() -> FloatTree
+    {
+        io::File file("wdas_cloud.vdb");
+        file.open();
+        auto grids = file.getGrids();
+        file.close();
+        auto gridBase = (*grids)[0];
+        auto grid = GridBase::grid<FloatGrid>(gridBase);
+        FloatTree tree(grid->tree());
+        tree.voxelizeActiveTiles();
+        return tree;
+    };
+
+    auto addCoalescedIJKs = [&]()
+    {
+        ijks.clear();
+
+        for (int tileIndex = 0; tileIndex < 8; tileIndex++) {
+            Int32 i(0);
+            Int32 j(0);
+            Int32 k(0);
+            if ((tileIndex & 1) == 1)   i -= 4096;
+            if ((tileIndex & 2) == 1)   j -= 4096;
+            if ((tileIndex & 4) == 1)   k -= 4096;
+            for (int n = 0; n < count; n++) {
+                ijks.emplace_back(i, j, k);
             }
-        } else if (!arg.empty()) {
-            filenames.push_back(arg);
         }
-    }
+    };
 
-    if (version) {
-        std::cout << "OpenVDB library version: "
-            << openvdb::getLibraryAbiVersionString() << "\n";
-        std::cout << "OpenVDB file format version: "
-            << openvdb::OPENVDB_FILE_VERSION << std::endl;
-        if (filenames.empty()) return EXIT_SUCCESS;
-    }
+    auto addInterleavedIJKs = [&]()
+    {
+        ijks.clear();
 
-    if (filenames.empty()) {
-        OPENVDB_LOG_FATAL("expected one or more OpenVDB files");
-        usage();
-    }
-
-    try {
-        openvdb::initialize();
-
-        /// @todo Remove the following at some point:
-        openvdb::Grid<openvdb::tree::Tree4<bool, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<float, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<double, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<int32_t, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<int64_t, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<openvdb::Vec2i, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<openvdb::Vec2s, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<openvdb::Vec2d, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<openvdb::Vec3i, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<openvdb::Vec3f, 4, 3, 3>::Type>::registerGrid();
-        openvdb::Grid<openvdb::tree::Tree4<openvdb::Vec3d, 4, 3, 3>::Type>::registerGrid();
-
-        if (stats) {
-            printLongListing(filenames);
-        } else {
-            printShortListing(filenames, metadata);
+        for (int n = 0; n < count; n++) {
+            for (int tileIndex = 0; tileIndex < 8; tileIndex++) {
+                Int32 i(0);
+                Int32 j(0);
+                Int32 k(0);
+                if ((tileIndex & 1) == 1)   i -= 4096;
+                if ((tileIndex & 2) == 1)   j -= 4096;
+                if ((tileIndex & 4) == 1)   k -= 4096;
+                ijks.emplace_back(i, j, k);
+            }
         }
-    }
-    catch (const std::exception& e) {
-        OPENVDB_LOG_FATAL(e.what());
-        exitStatus = EXIT_FAILURE;
-    }
-    catch (...) {
-        OPENVDB_LOG_FATAL("Exception caught (unexpected type)");
-        std::terminate();
+    };
+
+    auto addSequentialVoxelIJKs = [&](auto& tree)
+    {
+        ijks.clear();
+
+        auto& root = tree.root();
+
+        for (auto leaf = tree.cbeginLeaf(); leaf; ++leaf) {
+            for (auto iter = leaf->cbeginValueOn(); iter; ++iter) {
+                ijks.emplace_back(iter.getCoord());
+            }
+        }
+    };
+
+    auto addInterleavedVoxelIJKs = [&](auto& tree)
+    {
+        ijks.clear();
+
+        auto& root = tree.root();
+
+        std::vector<std::vector<Coord>> ijksRootChildren;
+        ijksRootChildren.resize(root.childCount());
+
+        size_t i = 0;
+        for (auto iter1 = tree.cbeginRootChildren(); iter1; ++iter1) {
+            auto& ijksRootChild = ijksRootChildren[i++];
+            for (auto iter2 = iter1->cbeginChildOn(); iter2; ++iter2) {
+                for (auto iter3 = iter2->cbeginChildOn(); iter3; ++iter3) {
+                    for (auto iter4 = iter3->cbeginValueOn(); iter4; ++iter4) {
+                        ijksRootChild.push_back(iter3.getCoord());
+                    }
+                }
+            }
+        }
+
+        size_t maxSize = 0;
+        for (const auto& ijksRootChild : ijksRootChildren) {
+            maxSize = std::max(maxSize, ijksRootChild.size());
+        }
+
+        for (i = 0; i < maxSize; i++) {
+            for (const auto& ijksRootChild : ijksRootChildren) {
+                if (i < ijksRootChild.size()) {
+                    ijks.push_back(ijksRootChild[i]);
+                }
+            }
+        }
+    };
+
+    auto addOneTile = [&](auto& tree)
+    {
+        tree.addTile(0, Coord(0, 0, 0), 1.0f, true);
+    };
+
+    auto addEightTiles = [&](auto& tree)
+    {
+        for (int i = -4096; i <= 0; i += 4096) {
+            for (int j = -4096; j <= 0; j += 4096) {
+                for (int k = -4096; k <= 0; k += 4096) {
+                    tree.addTile(0, Coord(i, j, k), 1.0f, true);
+                }
+            }
+        }
+    };
+
+    auto addSixtyFourTiles = [&](auto& tree)
+    {
+        for (int i = -(4096*2); i <= 4096; i += 4096) {
+            for (int j = -(4096*2); j <= 4096; j += 4096) {
+                for (int k = -(4096*2); k <= 4096; k += 4096) {
+                    tree.addTile(0, Coord(i, j, k), 1.0f, true);
+                }
+            }
+        }
+    };
+
+    auto rootQueryDirect = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        int total = 0;
+
+        { // warm up
+            for (const auto& ijk : ijks) {
+                total += root.getValueDepth(ijk);
+            }
+        }
+
+        double time = 0.0f;
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (const auto& ijk : ijks) {
+                total += root.getValueDepth(ijk);
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto rootQueryAccessor = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        int total = 0;
+
+        { // warm up
+            tree::ValueAccessor<FloatTree> valueAccessor(tree);
+            for (const auto& ijk : ijks) {
+                total += valueAccessor.getValueDepth(ijk);
+            }
+        }
+
+        double time = 0.0f;
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::ValueAccessor<FloatTree> valueAccessor(tree);
+
+            for (const auto& ijk : ijks) {
+                total += valueAccessor.getValueDepth(ijk);
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto getValueSequential = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto leaf = tree.cbeginLeaf(); leaf; ++leaf) {
+                for (auto iter = leaf->cbeginValueOn(); iter; ++iter) {
+                    total += iter.getValue();
+                }
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (auto leaf = tree.cbeginLeaf(); leaf; ++leaf) {
+                for (auto iter = leaf->cbeginValueOn(); iter; ++iter) {
+                    total += iter.getValue();
+                }
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto getValueSequential2 = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter1 = tree.cbeginRootChildren(); iter1; ++iter1) {
+                for (auto iter2 = iter1->cbeginChildOn(); iter2; ++iter2) {
+                    for (auto iter3 = iter2->cbeginChildOn(); iter3; ++iter3) {
+                        for (auto iter4 = iter3->cbeginValueOn(); iter4; ++iter4) {
+                            total += iter4.getValue();
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (auto iter1 = tree.cbeginRootChildren(); iter1; ++iter1) {
+                for (auto iter2 = iter1->cbeginChildOn(); iter2; ++iter2) {
+                    for (auto iter3 = iter2->cbeginChildOn(); iter3; ++iter3) {
+                        for (auto iter4 = iter3->cbeginValueOn(); iter4; ++iter4) {
+                            total += iter4.getValue();
+                        }
+                    }
+                }
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto getValueSequential3 = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto getValueDirect = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0;
+
+        { // warm up
+            for (const auto& ijk : ijks) {
+                total += root.getValue(ijk);
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (const auto& ijk : ijks) {
+                total += root.getValue(ijk);
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto getValueAccessor = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0;
+
+        { // warm up
+            tree::ValueAccessor<FloatTree> valueAccessor(tree);
+            for (const auto& ijk : ijks) {
+                total += valueAccessor.getValue(ijk);
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::ValueAccessor<FloatTree> valueAccessor(tree);
+
+            for (const auto& ijk : ijks) {
+                total += valueAccessor.getValue(ijk);
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueSequential = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto leaf = tree.cbeginLeaf(); leaf; ++leaf) {
+                for (auto iter = leaf->cbeginValueOn(); iter; ++iter) {
+                    total += iter.getValue();
+                }
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (auto leaf = tree.beginLeaf(); leaf; ++leaf) {
+                for (auto iter = leaf->beginValueOn(); iter; ++iter) {
+                    iter.setValue(iter.getValue() * 2);
+                }
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueSequential3 = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            for (auto iter = tree.beginValueOn(); iter; ++iter) {
+                iter.setValue(iter.getValue() * 2);
+            }
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto valueIterRange = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::IteratorRange<FloatTree::ValueOnCIter> iterRange(tree.cbeginValueOn());
+
+            total += iterRange.test() ? 1 : 0;
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto leafIterRange = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::IteratorRange<FloatTree::LeafCIter> iterRange(tree.cbeginLeaf());
+
+            total += iterRange.test() ? 1 : 0;
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto nodeIterRange = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::IteratorRange<FloatTree::NodeCIter> iterRange(tree.cbeginNode());
+
+            total += iterRange.test() ? 1 : 0;
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueForeachValue = [&](auto& tree, bool threaded, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        auto op = [&](const auto& iter) {
+            iter.setValue(iter.getValue() * 2);
+        };
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tools::foreach(tree.beginValueOn(), op, threaded);
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueForeachLeaf = [&](auto& tree, bool threaded, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        auto op = [&](const auto& leaf) {
+            for (auto iter = leaf->beginValueOn(); iter; ++iter) {
+                iter.setValue(iter.getValue() * 2);
+            }
+        };
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tools::foreach(tree.beginLeaf(), op, threaded);
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueForeachIterRange = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::IteratorRange<FloatTree::ValueOnIter> iterRange(tree.beginValueOn());
+
+            total += iterRange.test() ? 1 : 0;
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueLeafManager = [&](auto& tree, bool threaded, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        float total = 0.0f;
+
+        { // warm up
+            for (auto iter = tree.cbeginValueOn(); iter; ++iter) {
+                total += iter.getValue();
+            }
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::LeafManager<FloatTree> leafManager(tree);
+            DoubleOp op;
+            leafManager.foreach(op, threaded, /*grainSize=*/1);
+
+            time += timer.milliseconds();
+
+            if (total == 0.0f)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueLeafManagerCreate = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        size_t total = 0;
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::LeafManager<FloatTree> leafManager(tree);
+
+            total += leafManager.leafCount();
+
+            time += timer.milliseconds();
+
+            if (total == 0)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueNodeManagerCreate = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        Index32 total = 0;
+
+        { // warm up
+            tree::NodeManager<FloatTree> nodeManager(tree);
+            total += nodeManager.root().childCount();
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::NodeManager<FloatTree> nodeManager(tree);
+            total += nodeManager.root().childCount();
+
+            time += timer.milliseconds();
+
+            if (total == 0)     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueNodeManager = [&](auto& tree, bool threaded, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        { // warm up
+            tree::NodeManager<FloatTree> nodeManager(tree);
+            DoubleOp op;
+            nodeManager.foreachTopDown(op, threaded);
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::NodeManager<FloatTree> nodeManager(tree);
+            DoubleOp op;
+            nodeManager.foreachTopDown(op, threaded, /*grainSize=*/1);
+
+            time += timer.milliseconds();
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueDynamicNodeManagerCreate = [&](auto& tree, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        Index32 total = 0;
+
+        { // warm up
+            tree::DynamicNodeManager<FloatTree> nodeManager(tree);
+            total += nodeManager.root().childCount();
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::DynamicNodeManager<FloatTree> nodeManager(tree);
+            total += nodeManager.root().childCount();
+
+            time += timer.milliseconds();
+
+            if (total == Index32(0))     std::cerr << "Zero" << std::endl; // prevent optimization
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    auto setValueDynamicNodeManager = [&](auto& tree, bool threaded, int iterations = 10)
+    {
+        auto& root = tree.root();
+
+        double time = 0.0f;
+
+        { // warm up
+            tree::DynamicNodeManager<FloatTree> nodeManager(tree);
+            DoubleOp op;
+            nodeManager.foreachTopDown(op, threaded);
+        }
+
+        for (int i = 0; i < iterations; i++) {
+
+            timer.start();
+
+            tree::DynamicNodeManager<FloatTree> nodeManager(tree);
+            DoubleOp op;
+            nodeManager.foreachTopDown(op, threaded, /*grainSize=*/1);
+
+            time += timer.milliseconds();
+        }
+
+        util::printTime(std::cerr, time/iterations, " completed in ", "\n", 4, 3, 1);
+    };
+
+    // run benchmarks
+
+    {
+        std::cerr << "Cloud Set Value Sequential Leaf Iterator ...";
+        FloatTree tree = openCloud();
+        setValueSequential(tree, 1);
     }
 
-    return exitStatus;
+    {
+        std::cerr << "Cloud Set Value Foreach Leaf ...";
+        FloatTree tree = openCloud();
+        setValueForeachLeaf(tree, false, 1);
+    }
+
+    {
+        std::cerr << "Cloud Leaf Iterator Range ...";
+        FloatTree tree = openCloud();
+        leafIterRange(tree);
+    }
+
+    {
+        std::cerr << "Cloud Node Iterator Range ...";
+        FloatTree tree = openCloud();
+        nodeIterRange(tree);
+    }
+
+    {
+        std::cerr << "Cloud Value Iterator Range ...";
+        FloatTree tree = openCloud();
+        valueIterRange(tree);
+    }
+
+    {
+        std::cerr << "1 Tile Coalesced Root Query Direct ...";
+        FloatTree tree;
+        addOneTile(tree);
+        addCoalescedIJKs();
+        rootQueryDirect(tree);
+    }
+
+    {
+        std::cerr << "1 Tile Coalesced Root Query Accessor ...";
+        FloatTree tree;
+        addOneTile(tree);
+        addCoalescedIJKs();
+        rootQueryAccessor(tree);
+    }
+
+    {
+        std::cerr << "1 Tile Interleaved Root Query Direct ...";
+        FloatTree tree;
+        addOneTile(tree);
+        addInterleavedIJKs();
+        rootQueryDirect(tree);
+    }
+
+    {
+        std::cerr << "1 Tile Interleaved Root Query Accessor ...";
+        FloatTree tree;
+        addOneTile(tree);
+        addInterleavedIJKs();
+        rootQueryAccessor(tree);
+    }
+
+    {
+        std::cerr << "8 Tiles Coalesced Root Query Direct ...";
+        FloatTree tree;
+        addEightTiles(tree);
+        addCoalescedIJKs();
+        rootQueryDirect(tree);
+    }
+
+    {
+        std::cerr << "8 Tiles Coalesced Root Query Accessor ...";
+        FloatTree tree;
+        addEightTiles(tree);
+        addCoalescedIJKs();
+        rootQueryAccessor(tree);
+    }
+
+    {
+        std::cerr << "8 Tiles Interleaved Root Query Direct ...";
+        FloatTree tree;
+        addEightTiles(tree);
+        addInterleavedIJKs();
+        rootQueryDirect(tree);
+    }
+
+    {
+        std::cerr << "8 Tiles Interleaved Root Query Accessor ...";
+        FloatTree tree;
+        addEightTiles(tree);
+        addInterleavedIJKs();
+        rootQueryAccessor(tree);
+    }
+
+    {
+        std::cerr << "64 Tiles Coalesced Root Query Direct ...";
+        FloatTree tree;
+        addSixtyFourTiles(tree);
+        addCoalescedIJKs();
+        rootQueryDirect(tree);
+    }
+
+    {
+        std::cerr << "64 Tiles Coalesced Root Query Accessor ...";
+        FloatTree tree;
+        addSixtyFourTiles(tree);
+        addCoalescedIJKs();
+        rootQueryAccessor(tree);
+    }
+
+    {
+        std::cerr << "64 Tiles Interleaved Root Query Direct ...";
+        FloatTree tree;
+        addSixtyFourTiles(tree);
+        addInterleavedIJKs();
+        rootQueryDirect(tree);
+    }
+
+    {
+        std::cerr << "64 Tiles Interleaved Root Query Accessor ...";
+        FloatTree tree;
+        addSixtyFourTiles(tree);
+        addInterleavedIJKs();
+        rootQueryAccessor(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Sequential Leaf Iterator ...";
+        FloatTree tree = openCloud();
+        setValueSequential(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Foreach Leaf ...";
+        FloatTree tree = openCloud();
+        setValueForeachLeaf(tree, false);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Sequential Leaf Iterator ...";
+        FloatTree tree = openCloud();
+        getValueSequential(tree);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Sequential Hierarchy Iterator ...";
+        FloatTree tree = openCloud();
+        getValueSequential2(tree);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Sequential Voxel Iterator ...";
+        FloatTree tree = openCloud();
+        getValueSequential3(tree);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Sequential Direct ...";
+        FloatTree tree = openCloud();
+        addSequentialVoxelIJKs(tree);
+        getValueDirect(tree);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Sequential Accessor ...";
+        FloatTree tree = openCloud();
+        addSequentialVoxelIJKs(tree);
+        getValueAccessor(tree);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Interleaved Direct ...";
+        FloatTree tree = openCloud();
+        addInterleavedVoxelIJKs(tree);
+        getValueDirect(tree);
+    }
+
+    {
+        std::cerr << "Cloud Get Value Interleaved Accessor ...";
+        FloatTree tree = openCloud();
+        addInterleavedVoxelIJKs(tree);
+        getValueAccessor(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Sequential Leaf Iterator ...";
+        FloatTree tree = openCloud();
+        setValueSequential(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Sequential Voxel Iterator ...";
+        FloatTree tree = openCloud();
+        setValueSequential3(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Foreach Value ...";
+        FloatTree tree = openCloud();
+        setValueForeachValue(tree, false);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Foreach Leaf ...";
+        FloatTree tree = openCloud();
+        setValueForeachLeaf(tree, false);
+    }
+
+    for (int n = 1; n <= 32; n *= 2) {
+        std::cerr << "Cloud Set Value Foreach Value Thread" << n << " ...";
+        tbb::global_control global_control(tbb::global_control::max_allowed_parallelism, n);
+        FloatTree tree = openCloud();
+        setValueForeachValue(tree, true);
+    }
+
+    for (int n = 1; n <= 32; n *= 2) {
+        std::cerr << "Cloud Set Value Foreach Leaf Thread" << n << " ...";
+        tbb::global_control global_control(tbb::global_control::max_allowed_parallelism, n);
+        FloatTree tree = openCloud();
+        setValueForeachLeaf(tree, true);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Sequential Leaf Iterator ...";
+        FloatTree tree = openCloud();
+        setValueSequential(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Foreach Leaf ...";
+        FloatTree tree = openCloud();
+        setValueForeachLeaf(tree, false);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Foreach Iter Range ...";
+        FloatTree tree = openCloud();
+        setValueForeachIterRange(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value LeafManager Create ...";
+        FloatTree tree = openCloud();
+        setValueLeafManagerCreate(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value LeafManager ...";
+        FloatTree tree = openCloud();
+        setValueLeafManager(tree, false);
+    }
+
+    for (int n = 1; n <= 32; n *= 2) {
+        std::cerr << "Cloud Set Value LeafManager Thread" << n << " ...";
+        tbb::global_control global_control(tbb::global_control::max_allowed_parallelism, n);
+        FloatTree tree = openCloud();
+        setValueLeafManager(tree, true);
+    }
+
+    {
+        std::cerr << "Cloud Set Value NodeManager ...";
+        FloatTree tree = openCloud();
+        setValueNodeManager(tree, false);
+    }
+
+    {
+        std::cerr << "Cloud Set Value NodeManager Create ...";
+        FloatTree tree = openCloud();
+        setValueNodeManagerCreate(tree);
+    }
+
+    for (int n = 1; n <= 32; n *= 2) {
+        std::cerr << "Cloud Set Value NodeManager Thread" << n << " ...";
+        tbb::global_control global_control(tbb::global_control::max_allowed_parallelism, n);
+        FloatTree tree = openCloud();
+        setValueNodeManager(tree, true);
+    }
+
+    {
+        std::cerr << "Cloud Set Value DynamicNodeManager Create ...";
+        FloatTree tree = openCloud();
+        setValueDynamicNodeManagerCreate(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value DynamicNodeManager ...";
+        FloatTree tree = openCloud();
+        setValueDynamicNodeManager(tree, false);
+    }
+
+    for (int n = 1; n <= 32; n *= 2) {
+        std::cerr << "Cloud Set Value DynamicNodeManager Thread" << n << " ...";
+        tbb::global_control global_control(tbb::global_control::max_allowed_parallelism, n);
+        FloatTree tree = openCloud();
+        setValueDynamicNodeManager(tree, true);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Sequential Leaf Iterator ...";
+        FloatTree tree = openCloud();
+        setValueSequential(tree);
+    }
+
+    {
+        std::cerr << "Cloud Set Value Foreach Leaf ...";
+        FloatTree tree = openCloud();
+        setValueForeachLeaf(tree, false);
+    }
+
+    return 0;
 }
