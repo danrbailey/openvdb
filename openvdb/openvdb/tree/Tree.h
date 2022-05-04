@@ -1395,7 +1395,7 @@ Tree<RootNodeType>::releaseAllAccessors()
     }
     mAccessorRegistry.clear();
 
-    mAccessorRegistry.erase(nullptr);
+    mConstAccessorRegistry.erase(nullptr);
     for (typename ConstAccessorRegistry::iterator it = mConstAccessorRegistry.begin();
         it != mConstAccessorRegistry.end(); ++it)
     {
