@@ -47,10 +47,12 @@ template<typename T>
 inline uint16_t
 QuantizedUnitVec::pack(const Vec3<T>& vec)
 {
-    if (math::isZero(vec)) return 0;
-
     uint16_t data = 0;
     T x(vec[0]), y(vec[1]), z(vec[2]);
+
+    if (x == T(0) && y == T(0) && z == T(0)) {
+        return data;
+    }
 
     // The sign of the three components are first stored using
     // 3-bits and can then safely be discarded.
