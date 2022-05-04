@@ -499,7 +499,8 @@ public:
     static void parseNames( std::vector<std::string>& includeNames,
                             std::vector<std::string>& excludeNames,
                             bool& includeAll,
-                            const std::string& nameStr);
+                            const std::string& nameStr,
+                            const bool checkValidity = true);
 
     /// @brief Extract each name from @a nameStr into @a includeNames, or into @a excludeNames
     /// if the name is prefixed with a caret.

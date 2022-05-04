@@ -1281,7 +1281,8 @@ void
 AttributeSet::Descriptor::parseNames(   std::vector<std::string>& includeNames,
                                         std::vector<std::string>& excludeNames,
                                         bool& includeAll,
-                                        const std::string& nameStr)
+                                        const std::string& nameStr,
+                                        const bool checkValidity/*=true*/)
 {
     includeAll = false;
 
@@ -1295,7 +1296,9 @@ AttributeSet::Descriptor::parseNames(   std::vector<std::string>& includeNames,
         if (negate) {
             if (token.length() < 2) throw RuntimeError("Negate character (^) must prefix a name.");
             token = token.substr(1, token.length()-1);
-            if (!validName(token))  throw RuntimeError("Name contains invalid characters - " + token);
+            if (checkValidity && !validName(token)) {
+                throw RuntimeError("Name contains invalid characters - " + token);
+            }
             excludeNames.push_back(token);
         }
         else if (!includeAll) {
@@ -1304,7 +1307,9 @@ AttributeSet::Descriptor::parseNames(   std::vector<std::string>& includeNames,
                 includeNames.clear();
                 continue;
             }
-            if (!validName(token))  throw RuntimeError("Name contains invalid characters - " + token);
+            if (checkValidity && !validName(token)) {
+                throw RuntimeError("Name contains invalid characters - " + token);
+            }
             includeNames.push_back(token);
         }
     }
