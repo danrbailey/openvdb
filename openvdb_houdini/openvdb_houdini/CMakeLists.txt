@@ -254,6 +254,7 @@ if(NOT OPENVDB_DSO_NAMES)
     SOP_OpenVDB_Noise
     SOP_OpenVDB_Occlusion_Mask
     SOP_OpenVDB_Platonic
+    SOP_OpenVDB_Points_Attribute
     SOP_OpenVDB_Points_Convert
     SOP_OpenVDB_Points_Delete
     SOP_OpenVDB_Points_Group
