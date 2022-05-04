@@ -1318,8 +1318,12 @@ private:
         void operator()(const SizeRange& range) const {
             for (SizeType n = range.begin(), N = range.end(); n < N; ++n) {
                 const ValueType val = mat->getValue(n, n);
-                assert(!isApproxZero(val, ValueType(0.0001)));
-                vec[n] = static_cast<ValueType>(1.0 / val);
+                // check to avoid dividing by zero
+                if (!isApproxZero(val, ValueType(0.0001))) {
+                    vec[n] = static_cast<ValueType>(1.0 / val);
+                } else {
+                    vec[n] = ValueType(1.0);
+                }
             }
         }
         const MatrixType* mat; ValueType* vec;
