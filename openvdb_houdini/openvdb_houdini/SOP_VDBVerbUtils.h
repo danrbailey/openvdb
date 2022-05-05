@@ -11,6 +11,7 @@
 
 #include <GOP/GOP_Manager.h>
 #include <SOP/SOP_NodeParmsOptions.h> // for SOP_NodeCacheOptions
+#include <houdini_utils/ParmFactory.h>
 #include <openvdb/Types.h>
 #include <string>
 
@@ -19,7 +20,7 @@
 
 
 /// @brief SOP_NodeCacheOptions subclass that adds methods specific to SOP_NodeVDB
-class SOP_VDBCacheOptions: public SOP_NodeCacheOptions
+class SOP_VDBCacheOptions: public houdini_utils::SOP_AppStatsCacheOptions
 {
 public:
             SOP_VDBCacheOptions() {}

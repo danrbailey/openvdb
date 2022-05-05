@@ -35,6 +35,10 @@
 #include <sstream>
 #include <stdexcept>
 
+
+#include <appstats/HoudiniAppStats.h>
+
+
 namespace houdini_utils {
 
 namespace {
@@ -972,7 +976,9 @@ public:
 
     void cook(const CookParms& cookParms) const override
     {
-        if (auto* cache = static_cast<SOP_NodeCacheOptions*>(cookParms.cache())) {
+        if (auto* cache = static_cast<SOP_AppStatsCacheOptions*>(cookParms.cache())) {
+            const SOP_NodeParmsOptions& parms = cookParms.parms<SOP_NodeParmsOptions>();
+            HoudiniAppStats::ScopedTimer timer(name(), cache->appStatsData(parms));
             cache->doCook(this, cookParms);
         }
     }

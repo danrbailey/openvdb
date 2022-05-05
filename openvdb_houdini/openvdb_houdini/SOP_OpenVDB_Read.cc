@@ -15,6 +15,10 @@
 #include <stdexcept>
 #include <string>
 
+
+#include <appstats/HoudiniAppStats.h>
+
+
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
 
@@ -307,6 +311,8 @@ SOP_OpenVDB_Read::updateParmsFlags()
 OP_ERROR
 SOP_OpenVDB_Read::cookVDBSop(OP_Context& context)
 {
+    HoudiniAppStats::ScopedTimer timer(getOperator()->getName());
+
     try {
         hutil::ScopedInputLock lock(*this, context);
 

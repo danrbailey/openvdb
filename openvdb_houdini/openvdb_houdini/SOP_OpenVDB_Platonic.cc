@@ -12,6 +12,10 @@
 #include <openvdb/tools/LevelSetPlatonic.h>
 #include <openvdb/tools/LevelSetUtil.h>
 
+
+#include <appstats/HoudiniAppStats.h>
+
+
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
 
@@ -158,6 +162,8 @@ SOP_OpenVDB_Platonic::updateParmsFlags()
 OP_ERROR
 SOP_OpenVDB_Platonic::cookVDBSop(OP_Context& context)
 {
+    HoudiniAppStats::ScopedTimer timer(getOperator()->getName());
+
     try {
         hutil::ScopedInputLock lock(*this, context);
         gdp->clearAndDestroy();

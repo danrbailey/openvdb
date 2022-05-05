@@ -18,6 +18,8 @@
 #include <openvdb/tools/LevelSetRebuild.h> // tools::doLevelSetRebuild()
 #include <openvdb/tools/Merge.h>
 
+#include <appstats/HoudiniAppStats.h> // for explicit timing of SumMergeOp
+
 #include <UT/UT_Interrupt.h>
 #include <UT/UT_Version.h>
 #include <UT/UT_ConcurrentVector.h>
@@ -570,10 +572,13 @@ struct MergeOp
             auto grid = GridBase::grid<GridT>(result.front().grid);
             tree::DynamicNodeManager<TreeT> nodeManager(grid->tree());
             if (op == "sdfunion") {
+                HoudiniAppStats::ScopedTimer timer("DW_OpenVDBMerge.sdfunion");
                 nodeManager.foreachTopDown(tools::CsgUnionOp<TreeT>(trees));
             } else if (op == "sdfintersect") {
+                HoudiniAppStats::ScopedTimer timer("DW_OpenVDBMerge.sdfintersect");
                 nodeManager.foreachTopDown(tools::CsgIntersectionOp<TreeT>(trees));
             } else if (op == "add") {
+                HoudiniAppStats::ScopedTimer timer("DW_OpenVDBMerge.add");
                 nodeManager.foreachTopDown(tools::SumMergeOp<TreeT>(trees));
             }
         }

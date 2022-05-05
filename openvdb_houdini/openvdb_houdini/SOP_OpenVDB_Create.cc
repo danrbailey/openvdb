@@ -21,6 +21,9 @@
 #include <vector>
 
 
+#include <appstats/HoudiniAppStats.h>
+
+
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
 namespace cvdb = openvdb;
@@ -715,6 +718,8 @@ SOP_OpenVDB_Create::createNewGrid(
 OP_ERROR
 SOP_OpenVDB_Create::cookVDBSop(OP_Context &context)
 {
+    HoudiniAppStats::ScopedTimer timer(getOperator()->getName());
+
     try {
         hutil::ScopedInputLock lock(*this, context);
 

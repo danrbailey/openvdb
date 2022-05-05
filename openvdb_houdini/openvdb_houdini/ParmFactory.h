@@ -17,6 +17,7 @@
 #include <PRM/PRM_SpareData.h>
 #include <SOP/SOP_Node.h>
 #include <SOP/SOP_NodeVerb.h>
+#include <SOP/SOP_NodeParmsOptions.h>
 #if defined(PRODDEV_BUILD) || defined(DWREAL_IS_DOUBLE)
   // OPENVDB_HOUDINI_API, which has no meaning in a DWA build environment but
   // must at least exist, is normally defined by including openvdb/Platform.h.
@@ -552,6 +553,16 @@ public:
     /// @note An empty path will disable, reverting to the usual rules.
     virtual std::string getTabSubMenuPath(const OpFactory&) { return ""; }
 };
+
+
+////////////////////////////////////////
+
+
+class OPENVDB_HOUDINI_API SOP_AppStatsCacheOptions : public SOP_NodeCacheOptions
+{
+public:
+    virtual std::string appStatsData(const SOP_NodeParmsOptions&) const { return ""; }
+}; // class SOP_AppStatsCacheOptions
 
 
 ////////////////////////////////////////

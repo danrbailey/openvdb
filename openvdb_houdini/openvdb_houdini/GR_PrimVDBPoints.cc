@@ -17,6 +17,8 @@
 #include <openvdb/points/PointConversion.h>
 #include <openvdb_houdini/PointUtils.h>
 
+#include <appstats/HoudiniAppStats.h>
+
 #include <DM/DM_RenderTable.h>
 #include <GEO/GEO_PrimVDB.h>
 #include <GR/GR_Primitive.h>
@@ -734,6 +736,8 @@ GR_PrimVDBPoints::update(RE_Render *r,
 
     if (p.reason & (GR_GEO_CHANGED | GR_GEO_TOPOLOGY_CHANGED))
     {
+        HoudiniAppStats::ScopedTimer timer("GR_PrimVDBPoints");
+
         const GT_PrimVDB& gt_primVDB = static_cast<const GT_PrimVDB&>(*primh);
 
         const openvdb::GridBase* grid =

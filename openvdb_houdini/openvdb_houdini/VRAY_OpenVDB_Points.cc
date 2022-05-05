@@ -24,6 +24,8 @@
 #include <openvdb/points/PointGroup.h>
 #include <openvdb_houdini/PointUtils.h>
 
+#include <appstats/HoudiniAppStats.h>
+
 #include <algorithm>
 #include <sstream>
 #include <string>
@@ -464,6 +466,8 @@ VRAY_OpenVDB_Points::getBoundingBox(UT_BoundingBox &box)
 void
 VRAY_OpenVDB_Points::render()
 {
+    HoudiniAppStats::ScopedTimer timer("VRAY_OpenVDB_Points");
+
     using PointDataTree     = points::PointDataGrid::TreeType;
     using AttributeSet      = points::AttributeSet;
     using Descriptor        = AttributeSet::Descriptor;

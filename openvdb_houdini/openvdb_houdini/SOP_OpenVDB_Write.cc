@@ -17,6 +17,10 @@
 #include <stdexcept>
 #include <string>
 
+
+#include <appstats/HoudiniAppStats.h>
+
+
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
 
@@ -285,6 +289,8 @@ SOP_OpenVDB_Write::reportFloatPrecisionConflicts(const StringSet& conflicts)
 OP_ERROR
 SOP_OpenVDB_Write::cookVDBSop(OP_Context& context)
 {
+    HoudiniAppStats::ScopedTimer timer(getOperator()->getName());
+
     try {
         hutil::ScopedInputLock lock(*this, context);
         const fpreal t = context.getTime();

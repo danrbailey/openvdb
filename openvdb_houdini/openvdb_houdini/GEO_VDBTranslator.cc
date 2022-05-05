@@ -29,6 +29,10 @@
 #include <stdio.h>
 #include <iostream>
 
+
+#include <appstats/HoudiniAppStats.h>
+
+
 using namespace openvdb_houdini;
 using std::cerr;
 
@@ -191,6 +195,8 @@ GEO_VDBTranslator::fileStat(const char *filename, GA_Stat &stat, uint /*level*/)
 GA_Detail::IOStatus
 GEO_VDBTranslator::fileLoad(GEO_Detail *geogdp, UT_IStream &is, bool /*ate_magic*/)
 {
+    HoudiniAppStats::ScopedTimer timer("GEO_VDBTranslator.fileLoad");
+
     UT_WorkBuffer   buf;
     GU_Detail       *gdp = static_cast<GU_Detail*>(geogdp);
     bool            ok = true;
@@ -299,6 +305,8 @@ fileSaveVDB(const GEO_Detail *geogdp, OutputT os)
 GA_Detail::IOStatus
 GEO_VDBTranslator::fileSave(const GEO_Detail *geogdp, std::ostream &os)
 {
+    HoudiniAppStats::ScopedTimer timer("GEO_VDBTranslator.fileSave");
+
     // Saving via io::Stream will NOT save grid offsets, disabling partial
     // reading.
     return fileSaveVDB<openvdb::io::Stream, std::ostream &>(geogdp, os);
@@ -307,6 +315,8 @@ GEO_VDBTranslator::fileSave(const GEO_Detail *geogdp, std::ostream &os)
 GA_Detail::IOStatus
 GEO_VDBTranslator::fileSaveToFile(const GEO_Detail *geogdp, const char *fname)
 {
+    HoudiniAppStats::ScopedTimer timer("GEO_VDBTranslator.fileSaveToFile");
+
     // Saving via io::File will save grid offsets that allow for partial
     // reading.
     return fileSaveVDB<openvdb::io::File, const char *>(geogdp, fname);
