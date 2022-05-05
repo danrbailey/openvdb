@@ -106,7 +106,7 @@ GEO_VDBTranslator::fileStat(const char *filename, GA_Stat &stat, uint /*level*/)
     try {
         openvdb::io::File file(filename);
 
-        file.open(/*delayLoad*/false);
+        file.open(/*delayLoad*/true);
 
         int             nprim = 0;
         UT_BoundingBox  bbox;
