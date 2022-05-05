@@ -267,10 +267,11 @@ fileSaveVDB(const GEO_Detail *geogdp, OutputT os)
 
         fileMetadata.insertMeta("creator", openvdb::StringMetadata(versionStr));
 
-#if defined(SESI_OPENVDB)
+// ILM: We want detail attributes to show up in the file metadata so removing #if guard.
+// #if defined(SESI_OPENVDB)
         GU_PrimVDB::createMetadataFromAttrs(
             fileMetadata, GA_ATTRIB_GLOBAL, GA_Offset(0), *gdp);
-#endif
+// #endif
         // Create a VDB file object.
         FileT file(os);
 
