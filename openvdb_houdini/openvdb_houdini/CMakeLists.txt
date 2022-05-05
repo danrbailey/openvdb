@@ -194,6 +194,7 @@ target_include_directories(openvdb_houdini PUBLIC
   ${OPENVDB_HOUDINI_UTILS_DIR}
   ${OPENVDB_HOUDINI_LOCAL_DIR}
   ${PROJECT_BINARY_DIR}
+  ${AppStats_ROOT}/include
 )
 
 target_link_libraries(openvdb_houdini PUBLIC
