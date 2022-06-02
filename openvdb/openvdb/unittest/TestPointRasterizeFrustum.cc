@@ -2348,6 +2348,8 @@ TEST_F(TestPointRasterizeFrustum, testStreaming)
 
         initialMemory = rasterizer.memUsage();
 
+        std::cerr << "InitialMemory: " << initialMemory << "MB (" << size_t(4*mb) << " " << size_t(16*mb) << ")" << std::endl;
+
         EXPECT_TRUE(initialMemory > size_t(4*mb) && initialMemory < size_t(16*mb));
 
         EXPECT_EQ(size_t(2), rasterizer.size());
@@ -2393,6 +2395,8 @@ TEST_F(TestPointRasterizeFrustum, testStreaming)
         EXPECT_EQ(Index64(219780), velocity2->activeVoxelCount());
 
         size_t postRasterMemory = rasterizer.memUsage();
+
+        std::cerr << "PostRasterMemory: " << postRasterMemory << "MB (" << size_t(70*mb) << " " << size_t(85*mb) << ")" << std::endl;
 
         EXPECT_TRUE(postRasterMemory > size_t(70*mb) && postRasterMemory < size_t(85*mb));
 
