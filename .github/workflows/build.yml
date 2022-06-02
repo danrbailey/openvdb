@@ -32,6 +32,49 @@ on:
       - '**.md'
 
 jobs:
+  linux-vfx:
+    runs-on: ubuntu-latest
+    name: >
+      linux-vfx:${{ matrix.config.image }}-
+      abi:${{ matrix.config.abi }}-
+      cxx:${{ matrix.config.cxx }}-
+      type:${{ matrix.config.build }}
+    container:
+      image: aswf/ci-openvdb:${{ matrix.config.image }}
+    env:
+      CXX: ${{ matrix.config.cxx }}
+      CCACHE_DIR: /tmp/ccache
+    strategy:
+      matrix:
+        config:
+          - { cxx: clang++, image: '2022-clang11', abi: '9', build: 'Release' }
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v2
+    - name: timestamp
+      id: timestamp
+      shell: bash
+      run: echo "::set-output name=timestamp::`date -u +'%Y-%m-%dT%H:%M:%SZ'`"
+    - name: ccache
+      # don't use ccache for debug builds
+      if: matrix.config.build == 'Release'
+      id: ccache
+      uses: actions/cache@v2
+      with:
+        path: /tmp/ccache
+        key: linux-vfx${{ matrix.config.image }}-abi${{ matrix.config.abi }}-${{ matrix.config.cxx }}-${{ steps.timestamp.outputs.timestamp }}
+        restore-keys: linux-vfx${{ matrix.config.image }}-abi${{ matrix.config.abi }}-${{ matrix.config.cxx }}-
+    - name: build
+      run: >
+        ./ci/build.sh -v
+        --build-type=${{ matrix.config.build }}
+        --components=\"core,test\"
+        --cargs=\"-DOPENVDB_TESTS=PointRasterizeFrustum -DUSE_EXPLICIT_INSTANTIATION=OFF -DOPENVDB_CXX_STRICT=ON -DOPENVDB_ABI_VERSION_NUMBER=${{ matrix.config.abi }}\"
+    - name: test
+      run: |
+        cd build && ctest -V
+        cd - && ./ci/test_install.sh
+
   # Extra compiler tests
   linux-cxx17:
     runs-on: ubuntu-20.04
@@ -58,9 +101,11 @@ jobs:
         ./ci/build.sh -v
         --build-type=Release
         -j ${{ matrix.config.j }}
-        --components=\"core,python,test,bin,view,render,axcore,axbin,axtest\"
+        --components=\"core,test\"
         --cargs=\"
         -DUSE_BLOSC=OFF
+        -DOPENVDB_TESTS=PointRasterizeFrustum
+        -DUSE_EXPLICIT_INSTANTIATION=OFF
         -DCMAKE_CXX_STANDARD=17
         -DOPENVDB_ABI_VERSION_NUMBER=9
         -DCMAKE_INSTALL_PREFIX=`pwd`
