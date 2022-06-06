@@ -1,0 +1,4 @@
+float a = 1.0f;
+int@test1 = asinteger(a);
+double b = 2.0;
+int64@test2 = asinteger(b);
