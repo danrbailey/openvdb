@@ -269,6 +269,7 @@ if(NOT OPENVDB_DSO_NAMES)
     SOP_OpenVDB_Remap
     SOP_OpenVDB_Remove_Divergence
     SOP_OpenVDB_Resample
+    SOP_OpenVDB_Sample_From_Volume
     SOP_OpenVDB_Sample_Points
     SOP_OpenVDB_Scatter
     SOP_OpenVDB_Segment

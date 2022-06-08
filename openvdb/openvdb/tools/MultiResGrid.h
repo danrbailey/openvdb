@@ -55,13 +55,14 @@ OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
 namespace tools {
 
-template<typename TreeType>
+template<typename TreeT>
 class MultiResGrid: public MetaMap
 {
 public:
     using Ptr = SharedPtr<MultiResGrid>;
     using ConstPtr = SharedPtr<const MultiResGrid>;
 
+    using TreeType = TreeT;
     using ValueType = typename TreeType::ValueType;
     using ValueOnCIter = typename TreeType::ValueOnCIter;
     using ValueOnIter = typename TreeType::ValueOnIter;
