@@ -96,6 +96,9 @@ struct TreeToMerge
     template<typename NodeT>
     const NodeT* probeConstNode(const Coord& ijk) const;
 
+    /// @brief Prune the mask and remove the node associated with this coord.
+    void pruneMask(Index level, const Coord& ijk);
+
     /// @brief Return a pointer to the node of type @c NodeT that contains voxel (x, y, z).
     /// If the tree is non-const, steal the node and replace it with an inactive
     /// background-value tile.
@@ -424,6 +427,16 @@ TreeToMerge<TreeT>::probeConstNode(const Coord& ijk) const
 }
 
 template<typename TreeT>
+void
+TreeToMerge<TreeT>::pruneMask(Index level, const Coord& ijk)
+{
+    if (!mSteal) {
+        assert(this->hasMask());
+        this->mask()->addTile(level, ijk, false, false);
+    }
+}
+
+template<typename TreeT>
 template<typename NodeT>
 std::unique_ptr<NodeT>
 TreeToMerge<TreeT>::stealOrDeepCopyNode(const Coord& ijk)
@@ -436,10 +449,8 @@ TreeToMerge<TreeT>::stealOrDeepCopyNode(const Coord& ijk)
     } else {
         auto* child = this->probeConstNode<NodeT>(ijk);
         if (child) {
-            assert(this->hasMask());
             auto result = std::make_unique<NodeT>(*child);
-            // prune mask tree
-            this->mask()->addTile(NodeT::LEVEL+1, ijk, false, false);
+            this->pruneMask(NodeT::LEVEL+1, ijk);
             return result;
         }
     }
@@ -463,11 +474,7 @@ TreeToMerge<TreeT>::addTile(const Coord& ijk, const ValueType& value, bool activ
         }
     } else {
         auto* node = mTree->template probeConstNode<NodeT>(ijk);
-        // prune mask tree
-        if (node) {
-            assert(this->hasMask());
-            this->mask()->addTile(NodeT::LEVEL, ijk, false, false);
-        }
+        if (node)   this->pruneMask(NodeT::LEVEL, ijk);
     }
 }
 
