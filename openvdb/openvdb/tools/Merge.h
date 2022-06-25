@@ -629,12 +629,12 @@ struct Dispatch<0>
 // an DynamicNodeManager operator to add a value and modify active state
 // for every tile and voxel in a given subtree
 template <typename TreeT>
-struct ApplyTileToNodeOp
+struct ApplyTileSumToNodeOp
 {
     using LeafT = typename TreeT::LeafNodeType;
     using ValueT = typename TreeT::ValueType;
 
-    ApplyTileToNodeOp(const ValueT& value, const bool active):
+    ApplyTileSumToNodeOp(const ValueT& value, const bool active):
         mValue(value), mActive(active) { }
 
     template <typename NodeT>
@@ -671,7 +671,8 @@ struct ApplyTileToNodeOp
 private:
     ValueT mValue;
     bool mActive;
-}; // struct ApplyTileToNodeOp
+}; // struct ApplyTileSumToNodeOp
+
 
 
 } // namespace merge_internal
@@ -1302,7 +1303,7 @@ bool SumMergeOp<TreeT>::operator()(RootT& root, size_t) const
                 auto childPtr = mergeTree.template stealOrDeepCopyNode<ChildT>(key);
                 if (childPtr) {
                     // apply tile value and active state to the sub-tree
-                    merge_internal::ApplyTileToNodeOp<TreeT> applyOp(value, active);
+                    merge_internal::ApplyTileSumToNodeOp<TreeT> applyOp(value, active);
                     applyOp.run(*childPtr);
                     root.addChild(childPtr.release());
                 }
@@ -1363,7 +1364,7 @@ bool SumMergeOp<TreeT>::operator()(NodeT& node, size_t) const
                     auto childPtr = mergeTree.template stealOrDeepCopyNode<ChildT>(iter.getCoord());
                     if (childPtr) {
                         // apply tile value and active state to the sub-tree
-                        merge_internal::ApplyTileToNodeOp<TreeT> applyOp(*iter, iter.isValueOn());
+                        merge_internal::ApplyTileSumToNodeOp<TreeT> applyOp(*iter, iter.isValueOn());
                         applyOp.run(*childPtr);
                         node.addChild(childPtr.release());
                     }
