@@ -118,10 +118,11 @@ newSopOperator(OP_OperatorTable* table)
     parms.addFolder("Merge Operation");
 
     parms.add(hutil::ParmFactory(PRM_STRING, "op_fog", "Fog VDBs")
-        .setDefault("add")
+        .setDefault("max")
         .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
-            "none",             "None            ",
-            "add",              "Add"
+            "none",             "None",
+            "add",              "Add",
+            "max",              "Max"
         })
         .setTooltip("Merge operation for Fog VDBs.")
         .setDocumentation(
@@ -129,7 +130,9 @@ newSopOperator(OP_OperatorTable* table)
             "None:\n"
             "   Leaves input fog VDBs unchanged.\n\n"
             "Add:\n"
-            "   Generate the sum of all fog VDBs within the same collation.\n\n"));
+            "   Generate the sum of all fog VDBs within the same collation.\n\n"
+            "Max:\n"
+            "   Generate the max of all fog VDBs within the same collation.\n\n"));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "op_sdf", "SDF VDBs")
         .setDefault("sdfunion")
@@ -575,6 +578,9 @@ struct MergeOp
                 nodeManager.foreachTopDown(tools::CsgIntersectionOp<TreeT>(trees));
             } else if (op == "add") {
                 nodeManager.foreachTopDown(tools::SumMergeOp<TreeT>(trees));
+            } else if (op == "max") {
+                HoudiniAppStats::ScopedTimer timer("DW_OpenVDBMerge.max");
+                nodeManager.foreachTopDown(tools::MaxMergeOp<TreeT>(trees));
             }
         }
 
