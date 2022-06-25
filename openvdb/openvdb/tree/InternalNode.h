@@ -802,6 +802,7 @@ protected:
         typename ChildAllIterT, typename OtherChildAllIterT>
     static inline void doVisit2(NodeT&, OtherChildAllIterT&, VisitorOp&, bool otherIsLHS);
 
+public:
     ///@{
     /// @brief Returns a pointer to the child node at the linear offset n.
     /// @warning This protected method assumes that a child node exists at
@@ -810,6 +811,7 @@ protected:
     const ChildNodeType* getChildNode(Index n) const;
     ///@}
 
+protected:
     ///@{
     /// @brief Protected member classes for recursive multi-threading
     struct VoxelizeActiveTiles;
