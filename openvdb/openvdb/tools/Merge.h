@@ -388,6 +388,79 @@ private:
 ////////////////////////////////////////
 
 
+/// @brief DynamicNodeManager operator to merge trees using a sum operation.
+/// @note This class modifies the topology of the tree so is designed to be used
+/// from DynamicNodeManager::foreachTopDown().
+template<typename TreeT>
+struct MaxMergeOp
+{
+    using ValueT = typename TreeT::ValueType;
+    using RootT = typename TreeT::RootNodeType;
+    using LeafT = typename TreeT::LeafNodeType;
+
+    /// @brief Convenience constructor to sum a single non-const tree with another.
+    /// This constructor takes a Steal or DeepCopy tag dispatch class.
+    template <typename TagT>
+    MaxMergeOp(TreeT& tree, TagT tag) { mTreesToMerge.emplace_back(tree, tag); }
+
+    /// @brief Convenience constructor to sum a single const tree with another.
+    /// This constructor requires a DeepCopy tag dispatch class.
+    MaxMergeOp(const TreeT& tree, DeepCopy tag) { mTreesToMerge.emplace_back(tree, tag); }
+
+    /// @brief Constructor to sum a container of multiple const or non-const tree pointers.
+    /// A Steal tag requires a container of non-const trees, a DeepCopy tag will accept
+    /// either const or non-const trees.
+    template <typename TreesT, typename TagT>
+    MaxMergeOp(TreesT& trees, TagT tag)
+    {
+        for (auto* tree : trees) {
+            if (tree) {
+                mTreesToMerge.emplace_back(*tree, tag);
+            }
+        }
+    }
+
+    /// @brief Constructor to accept a vector of TreeToMerge objects, primarily
+    /// used when mixing const/non-const trees.
+    /// @note Sum order is preserved.
+    explicit MaxMergeOp(const std::vector<TreeToMerge<TreeT>>& trees)
+        : mTreesToMerge(trees) { }
+
+    /// @brief Constructor to accept a deque of TreeToMerge objects, primarily
+    /// used when mixing const/non-const trees.
+    /// @note Sum order is preserved.
+    explicit MaxMergeOp(const std::deque<TreeToMerge<TreeT>>& trees)
+        : mTreesToMerge(trees.cbegin(), trees.cend()) { }
+
+    /// @brief Return true if no trees being merged
+    bool empty() const { return mTreesToMerge.empty(); }
+
+    /// @brief Return the number of trees being merged
+    size_t size() const { return mTreesToMerge.size(); }
+
+    // Processes the root node. Required by the NodeManager
+    bool operator()(RootT& root, size_t idx) const;
+
+    // Processes the internal nodes. Required by the NodeManager
+    template<typename NodeT>
+    bool operator()(NodeT& node, size_t idx) const;
+
+    // Processes the leaf nodes. Required by the NodeManager
+    bool operator()(LeafT& leaf, size_t idx) const;
+
+private:
+    // on processing the root node, the background value is stored, retrieve it
+    // and check that the root node has already been processed
+    const ValueT& background() const;
+
+    mutable std::vector<TreeToMerge<TreeT>> mTreesToMerge;
+    mutable const ValueT* mBackground = nullptr;
+}; // struct MaxMergeOp
+
+
+////////////////////////////////////////
+
+
 template<typename TreeT>
 void TreeToMerge<TreeT>::initializeMask()
 {
@@ -688,6 +761,100 @@ private:
     bool mActive;
 }; // struct ApplyTileSumToNodeOp
 
+
+// an DynamicNodeManager operator to add a value and modify active state
+// for every tile and voxel in a given subtree
+template <typename TreeT>
+struct ApplyTileMaxToNodeOp
+{
+    using LeafT = typename TreeT::LeafNodeType;
+    using ValueT = typename TreeT::ValueType;
+
+    ApplyTileMaxToNodeOp(const ValueT& value, const bool active):
+        mValue(value), mActive(active) { }
+
+    template <typename NodeT>
+    void operator()(NodeT& node, size_t) const
+    {
+        // TODO: Need to add an InternalNode::setValue(Index offset, ...) to
+        // avoid the cost of using a value iterator or coordToOffset() in the case
+        // where node.isChildMaskOff() is true
+
+        for (auto iter = node.beginValueAll(); iter; ++iter) {
+            if (mValue > iter.getValue()) {
+                iter.setValue(mValue);
+            }
+            if (mActive)    iter.setValueOn(true);
+        }
+    }
+
+    void operator()(LeafT& leaf, size_t) const
+    {
+        auto* data = leaf.buffer().data();
+
+        if (mValue != zeroVal<ValueT>()) {
+            for (Index i = 0; i < LeafT::SIZE; ++i) {
+                if (mValue > data[i]) {
+                    data[i] = mValue;
+                }
+            }
+        }
+        if (mActive)    leaf.setValuesOn();
+    }
+
+    template <typename NodeT>
+    void run(NodeT& node)
+    {
+        Dispatch<NodeT::LEVEL>::run(node, *this);
+    }
+
+private:
+    ValueT mValue;
+    bool mActive;
+}; // struct ApplyTileMaxToNodeOp
+
+
+template<typename TreeT>
+struct MaxValueOp {
+    using ValueT = typename TreeT::ValueType;
+
+    MaxValueOp() { }
+    MaxValueOp(const MaxValueOp&, tbb::split) { }
+
+    void join(const MaxValueOp& other)
+    {
+        if (other.maxValue > maxValue) {
+            maxValue = other.maxValue;
+        }
+    }
+
+    // count the internal and leaf nodes
+    template<typename NodeT>
+    bool operator()(const NodeT& node, size_t = 0)
+    {
+        ValueT max = -std::numeric_limits<ValueT>::max();
+        for (auto iter = node.cbeginValueAll(); iter; ++iter) {
+            const ValueT value = *iter;
+            if (value > max) {
+                max = value;
+            }
+        }
+
+        if (max > maxValue) {
+            maxValue = max;
+        }
+        return true;
+    }
+
+    template <typename NodeT>
+    ValueT run(NodeT& node)
+    {
+        Dispatch<NodeT::LEVEL>::run(node, *this);
+        return maxValue;
+    }
+
+    ValueT maxValue = std::numeric_limits<ValueT>::lowest();
+};// MaxValueOp
 
 
 } // namespace merge_internal
@@ -1498,6 +1665,469 @@ SumMergeOp<TreeT>::background() const
 
 ////////////////////////////////////////
 
+
+template <typename TreeT>
+bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
+{
+    using ValueT = typename RootT::ValueType;
+    using ChildT = typename RootT::ChildNodeType;
+
+    if (this->empty())     return false;
+
+    // store the background value
+    if (!mBackground)   mBackground = &root.background();
+
+    // does the key exist in the root node?
+    auto keyExistsInRoot = [](const auto& rootToTest, const Coord& key) -> bool
+    {
+        return rootToTest.getValueDepth(key) > -1;
+    };
+
+    constexpr uint8_t TILE = 0x1;
+    constexpr uint8_t CHILD = 0x2;
+    constexpr uint8_t TARGET_CHILD = 0x4; // child already exists in the target tree
+
+    std::unordered_map<Coord, /*flags*/uint8_t> children;
+
+    // find all tiles and child nodes in our root
+
+    if (root.getTableSize() > 0) {
+        for (auto valueIter = root.cbeginValueAll(); valueIter; ++valueIter) {
+            const Coord& key = valueIter.getCoord();
+            children.insert({key, TILE});
+        }
+
+        for (auto childIter = root.cbeginChildOn(); childIter; ++childIter) {
+            const Coord& key = childIter.getCoord();
+            children.insert({key, CHILD | TARGET_CHILD});
+        }
+    }
+
+    // find all tiles and child nodes in other roots
+
+    for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+        const auto* mergeRoot = mergeTree.rootPtr();
+        if (!mergeRoot)     continue;
+
+        for (auto valueIter = mergeRoot->cbeginValueAll(); valueIter; ++valueIter) {
+            const Coord& key = valueIter.getCoord();
+            auto it = children.find(key);
+            if (it == children.end()) {
+                // if no element with this key, insert it
+                children.insert({key, TILE});
+            } else {
+                // mark as tile
+                it->second |= TILE;
+            }
+        }
+
+        for (auto childIter = mergeRoot->cbeginChildOn(); childIter; ++childIter) {
+            const Coord& key = childIter.getCoord();
+            auto it = children.find(key);
+            if (it == children.end()) {
+                // if no element with this key, insert it
+                children.insert({key, CHILD});
+            } else {
+                // mark as child
+                it->second |= CHILD;
+            }
+        }
+    }
+
+    // if any coords do not already exist in the root, insert an inactive background tile
+
+    for (const auto& it : children) {
+        if (!keyExistsInRoot(root, it.first)) {
+            root.addTile(it.first, root.background(), false);
+        }
+    }
+
+    std::unordered_map<Coord, TreeToMerge<TreeT>*> mergeNodesToSteal;
+
+    ChildT* child;
+    ValueT value;
+
+    for (auto iter = root.beginChildAll(); iter; ++iter) {
+        const Coord ijk = iter.getCoord();
+        const bool isChild = iter.probeChild(child, value);
+        ValueT max = value;
+        if (isChild) {
+            merge_internal::MaxValueOp<TreeT> maxValueOp;
+            max = maxValueOp.run(*child);
+        }
+        bool mergeNodeToSteal = false;
+
+        for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+            const auto* mergeRoot = mergeTree.rootPtr();
+            if (!mergeRoot)                            continue;
+
+            const auto* mergeNode = mergeRoot->template probeConstNode<ChildT>(ijk);
+            if (mergeNode) {
+                merge_internal::MaxValueOp<TreeT> maxValueOp;
+                value = maxValueOp.run(*mergeNode);
+
+                if (value > max) {
+                    max = value;
+                    // store which tree to steal this node from
+                    mergeNodesToSteal[ijk] = &mergeTree;
+                    mergeNodeToSteal = true;
+                }
+            } else {
+                bool mergeActive = mergeRoot->probeValue(ijk, value);
+
+                if (value > max) {
+                    iter.setValue(max);
+
+                    // reset mergeNodesToSteal index (if set)
+                    if (mergeNodeToSteal) {
+                        mergeNodesToSteal[ijk] = nullptr;
+                        mergeNodeToSteal = false;
+                    }
+                }
+            }
+        }
+    }
+
+    // reset mergeNodesToSteal for any indices where a child tile has been replaced by a
+    // child node as merge recursion will now need to continue to resolve this conflict
+
+    for (auto iter = root.beginChildOn(); iter; ++iter) {
+        const Coord ijk = iter.getCoord();
+        auto nodeIt = mergeNodesToSteal.find(ijk);
+        if (nodeIt != mergeNodesToSteal.end()) {
+            mergeNodesToSteal[ijk] = nullptr;
+        }
+    }
+
+    // steal or deep copy nodes and insert them in this root
+
+    for (const auto& it : mergeNodesToSteal) {
+        const Coord ijk = it.first;
+        TreeToMerge<TreeT>* mergeTree = it.second;
+        if (!mergeTree)     continue;
+        std::unique_ptr<ChildT> child = mergeTree->template stealOrDeepCopyNode<ChildT>(ijk,
+            std::numeric_limits<ValueT>::lowest());
+        if (child) {
+            const bool active = root.probeValue(ijk, value);
+            // apply tile value and active state to the sub-tree
+            merge_internal::ApplyTileMaxToNodeOp<TreeT> applyOp(value, active);
+            applyOp.run(*child);
+            // insert the child into the tree
+            root.addChild(child.release());
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////
+
+    // apply topology union of all sub-trees
+
+    for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+        const auto* mergeRoot = mergeTree.rootPtr();
+        if (!mergeRoot)     continue;
+
+        for (auto valueIter = mergeRoot->cbeginValueOn(); valueIter; ++valueIter) {
+            const Coord& key = valueIter.getCoord();
+
+            auto* node = root.template probeNode<ChildT>(key);
+            if (node)   node->setValuesOn();
+        }
+
+        for (auto childIter = mergeRoot->cbeginChildOn(); childIter; ++childIter) {
+            const Coord& key = childIter.getCoord();
+
+            auto* node = root.template probeNode<ChildT>(key);
+            if (node)   node->topologyUnion(*childIter);
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////
+
+    // set root background to be the max of all other root backgrounds
+
+    ValueT background = root.background();
+
+    for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+        const auto* mergeRoot = mergeTree.rootPtr();
+        if (!mergeRoot)     continue;
+        if (mergeRoot->background() > background) {
+            background = mergeRoot->background();
+        }
+    }
+
+    root.setBackground(background, /*updateChildNodes=*/false);
+
+    return true;
+}
+
+
+template <typename TreeT, typename NodeT>
+struct MergeNode
+{
+    using ValueT = typename NodeT::ValueType;
+
+    MergeNode(TreeToMerge<TreeT>* _tree, const NodeT* _node):
+        tree(_tree), node(_node) { }
+
+    MergeNode(const ValueT& _value, bool _active):
+        value(_value), active(_active) { }
+
+    bool isNode() const { return node != nullptr; }
+    bool isTile() const { return node == nullptr; }
+
+    TreeToMerge<TreeT>* tree = nullptr;
+    const NodeT* node = nullptr;
+    ValueT value;
+    bool active;
+}; // struct MergeNode
+
+
+template<typename TreeT>
+template<typename NodeT>
+bool MaxMergeOp<TreeT>::operator()(NodeT& node, size_t) const
+{
+    using ChildT = typename NodeT::ChildNodeType;
+    using NonConstNodeT = typename std::remove_const<NodeT>::type;
+
+    if (this->empty())     return false;
+
+    // cache merge nodes and merge tile values as these will need to be retrieved for every
+    // single node index otherwise
+
+    std::vector<MergeNode<TreeT, NonConstNodeT>> mergeNodes;
+    std::unordered_map<Index, TreeToMerge<TreeT>*> mergeNodesToSteal;
+
+    for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+        const auto* mergeRoot = mergeTree.rootPtr();
+        if (!mergeRoot)     continue;
+
+        const auto* mergeNode = mergeTree.template probeConstNode<NonConstNodeT>(
+            node.origin());
+        if (mergeNode) {
+            mergeNodes.emplace_back(&mergeTree, mergeNode);
+        }
+        else {
+            if (mergeTree.hasMask()) {
+                // if not stealing, test the original tree and if the node exists there, it means it
+                // has been stolen so don't merge the tile value with this node
+                const auto* originalMergeNode = mergeRoot->template probeConstNode<NonConstNodeT>(
+                    node.origin());
+                if (originalMergeNode)  continue;
+            }
+
+            ValueT mergeValue;
+            const bool mergeActive = mergeRoot->probeValue(node.origin(), mergeValue);
+            mergeNodes.emplace_back(mergeValue, mergeActive);
+        }
+    }
+
+    ChildT* child;
+    ValueT value;
+
+    // merge into tiles or child nodes
+
+    for (auto iter = node.beginChildAll(); iter; ++iter) {
+        const Index pos = iter.pos();
+        const bool isChild = iter.getItem(pos, child, value);
+        ValueT max = value;
+        if (isChild) {
+            merge_internal::MaxValueOp<TreeT> maxValueOp;
+            max = maxValueOp.run(*child);
+        }
+
+        bool mergeNodeToSteal = false;
+
+        for (const auto& mergeNode : mergeNodes) {
+
+            if (mergeNode.isTile() || mergeNode.node->isChildMaskOff(pos)) {
+                // merge tiles or child tiles
+
+                const ValueT& mergeValue = mergeNode.isTile() ?
+                    mergeNode.value : mergeNode.node->getValue(iter.getCoord());
+
+                if (mergeValue > max) {
+                    max = mergeValue;
+                    iter.setValue(max);
+
+                    // reset mergeNodesToSteal index (if set)
+                    if (mergeNodeToSteal) {
+                        mergeNodesToSteal[pos] = nullptr;
+                        mergeNodeToSteal = false;
+                    }
+                }
+            } else {
+                // merge child nodes
+
+                auto childIter = mergeNode.node->cbeginChildOn();
+                const auto& mergeChild = childIter.getItem(pos);
+                merge_internal::MaxValueOp<TreeT> maxValueOp;
+                ValueT mergeValue = maxValueOp.run(mergeChild);
+                if (mergeValue > max) {
+                    max = mergeValue;
+                    // store which tree to steal this node from
+                    mergeNodesToSteal[pos] = mergeNode.tree;
+                    mergeNodeToSteal = true;
+                }
+            }
+        }
+    }
+
+    // reset mergeNodesToSteal for any indices where a child tile has been replaced by a
+    // child node as merge recursion will now need to continue to resolve this conflict
+
+    for (auto iter = node.beginChildOn(); iter; ++iter) {
+        const Index pos = iter.pos();
+        auto nodeIt = mergeNodesToSteal.find(pos);
+        if (nodeIt != mergeNodesToSteal.end()) {
+            mergeNodesToSteal[pos] = nullptr;
+        }
+    }
+
+    // deep-copy or steal the nodes and apply the tile max to the node
+
+    for (const auto& it : mergeNodesToSteal) {
+        const Index pos = it.first;
+        TreeToMerge<TreeT>* mergeTree = it.second;
+        if (!mergeTree)     continue;
+        const Coord ijk = node.offsetToGlobalCoord(pos);
+        std::unique_ptr<ChildT> child = mergeTree->template stealOrDeepCopyNode<ChildT>(ijk,
+            std::numeric_limits<ValueT>::lowest());
+        if (child) {
+            // ensure there are no child values lower than the tile value it replaces
+            const bool active = node.probeValue(ijk, value);
+            merge_internal::ApplyTileMaxToNodeOp<TreeT> applyOp(value, active);
+            applyOp.run(*child);
+            node.addChild(child.release());
+        }
+    }
+
+    // perform topology union - first find any active tile with the same origin as this node
+
+    bool allActive = false;
+    for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+        const auto* mergeRoot = mergeTree.rootPtr();
+        if (!mergeRoot)     continue;
+
+        const auto* mergeNode = mergeTree.template probeConstNode<NonConstNodeT>(
+            node.origin());
+        if (mergeNode)  continue;
+        if (mergeTree.hasMask()) {
+            // if not stealing, test the original tree and if the node exists there, it means it
+            // has been stolen so don't try to re-apply the active state
+            const auto* originalMergeNode = mergeRoot->template probeConstNode<NonConstNodeT>(
+                node.origin());
+            if (originalMergeNode)  continue;
+        }
+
+        if (mergeRoot->isValueOn(node.origin())) {
+            allActive = true;
+            break;
+        }
+    }
+
+    if (allActive)  {
+        // if any active tiles discovered simple set the value mask to all on
+        node.setValuesOn();
+    } else {
+        // otherwise perform topology union for each sub-tree
+        for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+            const auto* mergeRoot = mergeTree.rootPtr();
+            if (!mergeRoot)     continue;
+
+            const auto* mergeNode = mergeTree.template probeConstNode<NonConstNodeT>(
+                node.origin());
+            if (!mergeNode)     continue;
+            node.topologyUnion(*mergeNode);
+        }
+    }
+
+    return true;
+}
+
+template <typename TreeT>
+bool MaxMergeOp<TreeT>::operator()(LeafT& leaf, size_t) const
+{
+    using RootT = typename TreeT::RootNodeType;
+    using RootChildT = typename RootT::ChildNodeType;
+    using NonConstRootChildT = typename std::remove_const<RootChildT>::type;
+    using LeafT = typename TreeT::LeafNodeType;
+    using ValueT = typename LeafT::ValueType;
+    using BufferT = typename LeafT::Buffer;
+    using NonConstLeafT = typename std::remove_const<LeafT>::type;
+
+    if (this->empty())      return false;
+
+    const Coord& ijk = leaf.origin();
+
+    // if buffer is not out-of-core and empty, leaf node must have only been
+    // partially constructed, so allocate and fill with background value
+
+    merge_internal::UnallocatedBuffer<BufferT, ValueT>::allocateAndFill(
+        leaf.buffer(), this->background());
+
+    auto* data = leaf.buffer().data();
+
+    // compute max in all other leaf nodes or tiles
+
+    for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
+        const RootT* mergeRoot = mergeTree.rootPtr();
+        if (!mergeRoot)     continue;
+
+        const LeafT* mergeLeaf = mergeTree.template probeConstNode<NonConstLeafT>(ijk);
+        if (mergeLeaf) {
+
+            // if buffer is not out-of-core yet empty, leaf node must have only been
+            // partially constructed, so skip merge
+
+            if (merge_internal::UnallocatedBuffer<BufferT, ValueT>::isPartiallyConstructed(
+                mergeLeaf->buffer())) {
+                continue;
+            }
+
+            const auto* mergeData = mergeLeaf->buffer().data();
+            for (Index i = 0; i < LeafT::SIZE; i++) {
+                if (mergeData[i] > data[i]) {
+                    data[i] = mergeData[i];
+                }
+            }
+            leaf.getValueMask() |= mergeLeaf->getValueMask();
+        } else {
+            if (mergeTree.hasMask()) {
+                // if not stealing, test the original tree and if the leaf exists there, it means it
+                // has been stolen so don't merge the tile value with this leaf
+                const LeafT* originalMergeLeaf = mergeRoot->template probeConstNode<NonConstLeafT>(ijk);
+                if (originalMergeLeaf)  continue;
+            }
+
+            const RootChildT* mergeRootChild = mergeRoot->template probeConstNode<NonConstRootChildT>(ijk);
+            ValueT mergeValue;
+            bool mergeActive = mergeRootChild ?
+                mergeRootChild->probeValue(ijk, mergeValue) : mergeRoot->probeValue(ijk, mergeValue);
+
+            for (Index i = 0; i < LeafT::SIZE; i++) {
+                if (mergeValue > data[i]) {
+                    data[i] = mergeValue;
+                }
+            }
+            if (mergeActive)    leaf.setValuesOn();
+        }
+    }
+
+    return false;
+}
+
+template <typename TreeT>
+const typename MaxMergeOp<TreeT>::ValueT&
+MaxMergeOp<TreeT>::background() const
+{
+    // this operator is only intended to be used with foreachTopDown()
+    assert(mBackground);
+    return *mBackground;
+}
+
+
+////////////////////////////////////////
+
+
 // Explicit Template Instantiation
 
 #ifdef OPENVDB_USE_EXPLICIT_INSTANTIATION
@@ -1525,6 +2155,16 @@ OPENVDB_INSTANTIATE_STRUCT SumMergeOp<Int64Tree>;
 OPENVDB_INSTANTIATE_STRUCT SumMergeOp<Vec3STree>;
 OPENVDB_INSTANTIATE_STRUCT SumMergeOp<Vec3DTree>;
 OPENVDB_INSTANTIATE_STRUCT SumMergeOp<Vec3ITree>;
+
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<MaskTree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<BoolTree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<FloatTree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<DoubleTree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<Int32Tree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<Int64Tree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<Vec3STree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<Vec3DTree>;
+OPENVDB_INSTANTIATE_STRUCT MaxMergeOp<Vec3ITree>;
 
 OPENVDB_INSTANTIATE_STRUCT CsgUnionOrIntersectionOp<FloatTree, true>;
 OPENVDB_INSTANTIATE_STRUCT CsgUnionOrIntersectionOp<DoubleTree, true>;
