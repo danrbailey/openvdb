@@ -81,6 +81,7 @@ else()
     TestCoord.cc
     TestCount.cc
     TestCpt.cc
+    TestCubicInterp.cc
     TestCurl.cc
     TestDelayedLoadMetadata.cc
     TestDense.cc

@@ -58,11 +58,12 @@ namespace tools {
 /// @details Order = 0: closest point
 ///          Order = 1: tri-linear
 ///          Order = 2: tri-quadratic
+///          Order = 3: tri-cubic
 ///          Staggered: Set to true for MAC grids
 template <size_t Order, bool Staggered = false>
 struct Sampler
 {
-    static_assert(Order < 3, "Samplers of order higher than 2 are not supported");
+    static_assert(Order < 4, "Samplers of order higher than 3 are not supported");
     static const char* name();
     static int radius();
     static bool mipmap();
@@ -182,6 +183,29 @@ struct QuadraticSampler
 
     template<class ValueT, size_t N>
     static inline ValueT triquadraticInterpolation(ValueT (&data)[N][N][N], const Vec3R& uvw);
+};
+
+
+struct CubicSampler
+{
+    static const char* name() { return "cubic"; }
+    static int radius() { return 2; }
+    static bool mipmap() { return true; }
+    static bool consistent() { return false; }
+    static bool staggered() { return false; }
+    static size_t order() { return 3; }
+
+    template<class TreeT>
+    static bool sample(const TreeT& inTree, const Vec3R& inCoord,
+                       typename TreeT::ValueType& result);
+
+    /// @brief Triquadratically reconstruct @a inTree at to @a inCoord.
+    /// @return the reconstructed value
+    template<class TreeT>
+    static typename TreeT::ValueType sample(const TreeT& inTree, const Vec3R& inCoord);
+
+    template<class ValueT, size_t N>
+    static inline ValueT tricubicInterpolation(ValueT (&data)[N][N][N], const Vec3R& uvw);
 };
 
 
@@ -876,6 +900,90 @@ QuadraticSampler::sample(const TreeT& inTree, const Vec3R& inCoord)
 }
 
 
+//////////////////////////////////////// CubicSampler
+
+
+template<class TreeT>
+inline bool
+CubicSampler::sample(const TreeT& inTree, const Vec3R& inCoord,
+    typename TreeT::ValueType& result)
+{
+    using ValueT = typename TreeT::ValueType;
+
+    const Vec3i inIdx = local_util::floorVec3(inCoord), inLoIdx = inIdx - Vec3i(1, 1, 1);
+    const Vec3R uvw = inCoord - inIdx;
+
+    // Retrieve the values of the 64 voxels surrounding the
+    // fractional source coordinates.
+    bool active = false;
+    ValueT data[4][4][4];
+    for (int dx = 0, ix = inLoIdx.x(); dx < 4; ++dx, ++ix) {
+        for (int dy = 0, iy = inLoIdx.y(); dy < 4; ++dy, ++iy) {
+            for (int dz = 0, iz = inLoIdx.z(); dz < 4; ++dz, ++iz) {
+                if (inTree.probeValue(Coord(ix, iy, iz), data[dx][dy][dz])) active = true;
+            }
+        }
+    }
+    result = CubicSampler::tricubicInterpolation(data, uvw);
+
+    return active;
+}
+
+template<class TreeT>
+inline typename TreeT::ValueType
+CubicSampler::sample(const TreeT& inTree, const Vec3R& inCoord)
+{
+    using ValueT = typename TreeT::ValueType;
+
+    const Vec3i inIdx = local_util::floorVec3(inCoord), inLoIdx = inIdx - Vec3i(1, 1, 1);
+    const Vec3R uvw = inCoord - inIdx;
+
+    // Retrieve the values of the 64 voxels surrounding the
+    // fractional source coordinates.
+    ValueT data[4][4][4];
+    for (int dx = 0, ix = inLoIdx.x(); dx < 4; ++dx, ++ix) {
+        for (int dy = 0, iy = inLoIdx.y(); dy < 4; ++dy, ++iy) {
+            for (int dz = 0, iz = inLoIdx.z(); dz < 4; ++dz, ++iz) {
+                data[dx][dy][dz] = inTree.getValue(Coord(ix, iy, iz));
+            }
+        }
+    }
+    return CubicSampler::tricubicInterpolation(data, uvw);
+}
+
+template<class ValueT, size_t N>
+inline ValueT
+CubicSampler::tricubicInterpolation(ValueT (&data)[N][N][N], const Vec3R& uvw)
+{
+    auto _interpolate = [](const ValueT* value, Vec3R::ValueType weight)
+    {
+        OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
+        // p[1] + 0.5 * x*(p[2] - p[0] + x*(2.0*p[0] - 5.0*p[1] + 4.0*p[2] - p[3] + x*(3.0*(p[1] - p[2]) + p[3] - p[0])));
+        const ValueT temp = value[1] + 0.5 * weight * (value[2] - value[0]
+            + weight * (2.0 * value[0] - 5.0 * value[1] + 4.0 * value[2] - value[3]
+                + weight * (3.0 * (value[1] - value[2]) + value[3] - value[0])));
+        OPENVDB_NO_TYPE_CONVERSION_WARNING_END
+        return static_cast<ValueT>(temp);
+    };
+
+    auto _bicubicInterpolate = [&_interpolate](ValueT p[4][4], Vec3R::ValueType x, Vec3R::ValueType y){
+        ValueT arr[4];
+        arr[0] = _interpolate(p[0], y);
+        arr[1] = _interpolate(p[1], y);
+        arr[2] = _interpolate(p[2], y);
+        arr[3] = _interpolate(p[3], y);
+        return _interpolate(arr, x);
+    };
+
+    ValueT arr[4];
+    arr[0] = _bicubicInterpolate(data[0], uvw[1], uvw[2]);
+    arr[1] = _bicubicInterpolate(data[1], uvw[1], uvw[2]);
+    arr[2] = _bicubicInterpolate(data[2], uvw[1], uvw[2]);
+    arr[3] = _bicubicInterpolate(data[3], uvw[1], uvw[2]);
+    return _interpolate(arr, uvw[0]);
+}
+
+
 //////////////////////////////////////// StaggeredPointSampler
 
 
@@ -1000,6 +1108,9 @@ struct Sampler<1, false> : public BoxSampler {};
 
 template <>
 struct Sampler<2, false> : public QuadraticSampler {};
+
+template <>
+struct Sampler<3, false> : public CubicSampler {};
 
 template <>
 struct Sampler<0, true> : public StaggeredPointSampler {};
