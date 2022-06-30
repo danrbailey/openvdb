@@ -3486,5 +3486,80 @@ TEST_F(TestMerge, testMax)
             EXPECT_EQ(tree.cbeginLeaf()->getValue(11), 50.0f);
             EXPECT_EQ(tree.cbeginLeaf()->getValue(12), 1.0f);
         }
+
+        { // merge a tile and a leaf node into an empty tree
+            FloatTree tree(10.0f), tree2(20.0f), tree3(30.0f);
+            tree2.addTile(/*level=*/1, Coord(0, 0, 0), 40.0f, true);
+            auto* leaf3 = tree3.touchLeaf(Coord(0, 0, 0));
+            leaf3->setValueOnly(11, 50.0f);
+            leaf3->setValueOnly(12, 0.0f);
+
+            std::vector<FloatTree*> trees{&tree, &tree2, &tree3};
+
+            tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
+            std::unique_ptr<tools::MaxMergeOp<FloatTree>> mergeOp;
+            if (i == 0) {
+                mergeOp.reset(new tools::MaxMergeOp<FloatTree>(trees, Steal()));
+            } else {
+                mergeOp.reset(new tools::MaxMergeOp<FloatTree>(trees, DeepCopy()));
+            }
+            nodeManager.foreachTopDown(*mergeOp, false);
+
+            EXPECT_EQ(Index32(1), tree.leafCount());
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(0), 40.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(10), 40.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(11), 50.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(12), 40.0f);
+        }
+
+        { // merge a leaf node and a tile into an empty tree
+            FloatTree tree(10.0f), tree2(20.0f), tree3(30.0f);
+            auto* leaf2 = tree2.touchLeaf(Coord(0, 0, 0));
+            leaf2->setValueOnly(11, 50.0f);
+            leaf2->setValueOnly(12, 0.0f);
+            tree3.addTile(/*level=*/1, Coord(0, 0, 0), 40.0f, true);
+
+            std::vector<FloatTree*> trees{&tree, &tree2, &tree3};
+
+            tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
+            std::unique_ptr<tools::MaxMergeOp<FloatTree>> mergeOp;
+            if (i == 0) {
+                mergeOp.reset(new tools::MaxMergeOp<FloatTree>(trees, Steal()));
+            } else {
+                mergeOp.reset(new tools::MaxMergeOp<FloatTree>(trees, DeepCopy()));
+            }
+            nodeManager.foreachTopDown(*mergeOp, false);
+
+            EXPECT_EQ(Index32(1), tree.leafCount());
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(0), 40.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(10), 40.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(11), 50.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(12), 40.0f);
+        }
+
+        { // merge a leaf node and a tile into an empty tree
+            FloatTree tree(10.0f), tree2(20.0f), tree3(80.0f);
+            tree.addTile(/*level=*/1, Coord(0, 0, 0), 40.0f, true);
+            auto* leaf2 = tree2.touchLeaf(Coord(0, 0, 0));
+            leaf2->setValueOnly(11, 90.0f);
+            leaf2->setValueOnly(12, 0.0f);
+
+            std::vector<FloatTree*> trees{&tree, &tree2, &tree3};
+
+            tree::DynamicNodeManager<FloatTree, 3> nodeManager(tree);
+            std::unique_ptr<tools::MaxMergeOp<FloatTree>> mergeOp;
+            if (i == 0) {
+                mergeOp.reset(new tools::MaxMergeOp<FloatTree>(trees, Steal()));
+            } else {
+                mergeOp.reset(new tools::MaxMergeOp<FloatTree>(trees, DeepCopy()));
+            }
+            nodeManager.foreachTopDown(*mergeOp, false);
+
+            EXPECT_EQ(Index32(1), tree.leafCount());
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(0), 80.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(10), 80.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(11), 90.0f);
+            EXPECT_EQ(tree.cbeginLeaf()->getValue(12), 80.0f);
+        }
     }
 }

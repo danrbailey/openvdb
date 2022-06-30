@@ -1801,7 +1801,7 @@ bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
         }
     }
 
-    // steal or deep copy nodes and insert them in this root (this could be parallelized)
+    // steal or deep copy nodes and insert them in this root
 
     for (const auto& it : mergeNodesToSteal) {
         const Coord ijk = it.first;
