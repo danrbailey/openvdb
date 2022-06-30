@@ -104,6 +104,13 @@ struct TreeToMerge
     /// background-value tile.
     /// If the tree is const, deep-copy the node and modify the mask tree to prune the node.
     template <typename NodeT>
+    std::unique_ptr<NodeT> stealOrDeepCopyNode(const Coord& ijk, const ValueType& value);
+
+    /// @brief Return a pointer to the node of type @c NodeT that contains voxel (x, y, z).
+    /// If the tree is non-const, steal the node and replace it with an inactive
+    /// background-value tile.
+    /// If the tree is const, deep-copy the node and modify the mask tree to prune the node.
+    template <typename NodeT>
     std::unique_ptr<NodeT> stealOrDeepCopyNode(const Coord& ijk);
 
     /// @brief Add a tile containing voxel (x, y, z) at the level of NodeT,
@@ -512,12 +519,12 @@ TreeToMerge<TreeT>::pruneMask(Index level, const Coord& ijk)
 template<typename TreeT>
 template<typename NodeT>
 std::unique_ptr<NodeT>
-TreeToMerge<TreeT>::stealOrDeepCopyNode(const Coord& ijk)
+TreeToMerge<TreeT>::stealOrDeepCopyNode(const Coord& ijk, const ValueType& value)
 {
     if (mSteal) {
         TreeType* tree = const_cast<TreeType*>(mTree);
         return std::unique_ptr<NodeT>(
-            tree->root().template stealNode<NodeT>(ijk, mTree->root().background(), false)
+            tree->root().template stealNode<NodeT>(ijk, value, false)
         );
     } else {
         auto* child = this->probeConstNode<NodeT>(ijk);
@@ -528,6 +535,14 @@ TreeToMerge<TreeT>::stealOrDeepCopyNode(const Coord& ijk)
         }
     }
     return std::unique_ptr<NodeT>();
+}
+
+template<typename TreeT>
+template<typename NodeT>
+std::unique_ptr<NodeT>
+TreeToMerge<TreeT>::stealOrDeepCopyNode(const Coord& ijk)
+{
+    return this->stealOrDeepCopyNode<NodeT>(ijk, mTree->root().background());
 }
 
 template<typename TreeT>
@@ -1694,7 +1709,6 @@ bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
 {
     using ValueT = typename RootT::ValueType;
     using ChildT = typename RootT::ChildNodeType;
-    using NonConstChildT = typename std::remove_const<ChildT>::type;
 
     if (this->empty())     return false;
 
@@ -1824,7 +1838,8 @@ bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
         const Coord ijk = it.first;
         TreeToMerge<TreeT>* mergeTree = it.second;
         if (!mergeTree)     continue;
-        std::unique_ptr<ChildT> child = mergeTree->template stealOrDeepCopyNode<ChildT>(ijk);
+        std::unique_ptr<ChildT> child = mergeTree->template stealOrDeepCopyNode<ChildT>(ijk,
+            std::numeric_limits<ValueT>::lowest());
         if (child) {
             const bool active = root.probeValue(ijk, value);
             // apply tile value and active state to the sub-tree
@@ -1981,7 +1996,8 @@ bool MaxMergeOp<TreeT>::operator()(NodeT& node, size_t) const
         TreeToMerge<TreeT>* mergeTree = it.second;
         if (!mergeTree)     continue;
         const Coord ijk = node.offsetToGlobalCoord(pos);
-        std::unique_ptr<ChildT> child = mergeTree->template stealOrDeepCopyNode<ChildT>(ijk);
+        std::unique_ptr<ChildT> child = mergeTree->template stealOrDeepCopyNode<ChildT>(ijk,
+            std::numeric_limits<ValueT>::lowest());
         if (child) {
             // ensure there are no child values lower than the tile value it replaces
             const bool active = node.probeValue(ijk, value);
