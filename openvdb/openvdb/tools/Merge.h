@@ -672,7 +672,8 @@ struct Dispatch
     template <typename NodeT, typename OpT>
     static void run(NodeT& node, OpT& op)
     {
-        using ChildT = typename NodeT::ChildNodeType;
+        using NonConstChildT = typename NodeT::ChildNodeType;
+        using ChildT = typename CopyConstness<NodeT, NonConstChildT>::Type;
 
         // use nested parallelism if there is more than one child
 
@@ -847,12 +848,13 @@ struct MaxValueOp {
     }
 
     template <typename NodeT>
-    void run(NodeT& node)
+    ValueT run(NodeT& node)
     {
         Dispatch<NodeT::LEVEL>::run(node, *this);
+        return maxValue;
     }
 
-    ValueT maxValue = -std::numeric_limits<ValueT>::max();
+    ValueT maxValue = std::numeric_limits<ValueT>::lowest();
 };// MaxValueOp
 
 
@@ -1666,45 +1668,6 @@ SumMergeOp<TreeT>::background() const
 
 
 template <typename TreeT>
-struct MaxValueOp
-{
-    using ValueT = typename TreeT::ValueType;
-    using LeafT = typename TreeT::LeafNodeType;
-
-    template <typename NodeT>
-    static ValueT maxValue(const NodeT& node)
-    {
-        ValueT max = -std::numeric_limits<ValueT>::max();
-        for (auto iter = node.cbeginValueAll(); iter; ++iter) {
-            const ValueT value = *iter;
-            if (value > max) {
-                max = value;
-            }
-        }
-        for (auto iter = node.cbeginChildOn(); iter; ++iter) {
-            const ValueT value = MaxValueOp<TreeT>::maxValue(*iter);
-            if (value > max) {
-                max = value;
-            }
-        }
-        return max;
-    }
-
-    static ValueT maxValue(const LeafT& leaf)
-    {
-        ValueT max = -std::numeric_limits<ValueT>::max();
-        for (auto iter = leaf.cbeginValueAll(); iter; ++iter) {
-            const ValueT value = *iter;
-            if (value > max) {
-                max = value;
-            }
-        }
-        return max;
-    }
-};
-
-
-template <typename TreeT>
 bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
 {
     using ValueT = typename RootT::ValueType;
@@ -1788,7 +1751,11 @@ bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
     for (auto iter = root.beginChildAll(); iter; ++iter) {
         const Coord ijk = iter.getCoord();
         const bool isChild = iter.probeChild(child, value);
-        ValueT max = isChild ? MaxValueOp<TreeT>::maxValue(*child) : value;
+        ValueT max = value;
+        if (isChild) {
+            merge_internal::MaxValueOp<TreeT> maxValueOp;
+            max = maxValueOp.run(*child);
+        }
         bool mergeNodeToSteal = false;
 
         for (TreeToMerge<TreeT>& mergeTree : mTreesToMerge) {
@@ -1797,7 +1764,9 @@ bool MaxMergeOp<TreeT>::operator()(RootT& root, size_t) const
 
             const auto* mergeNode = mergeRoot->template probeConstNode<ChildT>(ijk);
             if (mergeNode) {
-                value = MaxValueOp<TreeT>::maxValue(*mergeNode);
+                merge_internal::MaxValueOp<TreeT> maxValueOp;
+                value = maxValueOp.run(*mergeNode);
+
                 if (value > max) {
                     max = value;
                     // store which tree to steal this node from
@@ -1938,7 +1907,12 @@ bool MaxMergeOp<TreeT>::operator()(NodeT& node, size_t) const
     for (auto iter = node.beginChildAll(); iter; ++iter) {
         const Index pos = iter.pos();
         const bool isChild = iter.getItem(pos, child, value);
-        ValueT max = isChild ? MaxValueOp<TreeT>::maxValue(*child) : value;
+        ValueT max = value;
+        if (isChild) {
+            merge_internal::MaxValueOp<TreeT> maxValueOp;
+            max = maxValueOp.run(*child);
+        }
+
         bool mergeNodeToSteal = false;
 
         for (const auto& mergeNode : mergeNodes) {
@@ -1967,7 +1941,8 @@ bool MaxMergeOp<TreeT>::operator()(NodeT& node, size_t) const
 
                 // TODO: find a way to access this without using a protected member function
                 const auto* child = mergeNode.node->getChildNode(pos);
-                ValueT mergeValue = MaxValueOp<TreeT>::maxValue(*child);
+                merge_internal::MaxValueOp<TreeT> maxValueOp;
+                ValueT mergeValue = maxValueOp.run(*child);
                 if (mergeValue > max) {
                     max = mergeValue;
                     // store which tree to steal this node from
