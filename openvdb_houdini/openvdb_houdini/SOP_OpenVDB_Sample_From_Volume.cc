@@ -361,15 +361,14 @@ struct SampleValueMipMapOp
 {
     using MultiResGridT = typename openvdb::tools::MultiResGrid<ValuesTreeT>;
 
-    SampleValueMipMapOp(const MultiResGridT& valueGrid, const PositionGridT& positionGrid, const openvdb::FloatGrid& mipLevelGrid,
-        const float mipOffset, const float bias)
+    SampleValueMipMapOp(const MultiResGridT& valueGrid, const PositionGridT& positionGrid, const openvdb::FloatGrid& mipLevelGrid, const float bias)
         : mValueGrid(valueGrid)
         , mPositionAccessor(positionGrid.tree())
         , mMipAccessor(mipLevelGrid.tree())
         , mValueTransform(valueGrid.transform())
         , mPositionTransform(positionGrid.transform())
         , mMipTransform(mipLevelGrid.transform())
-        , mMipOffset(mipOffset - bias)
+        , mBias(bias)
         , mMaxMipLevel(valueGrid.numLevels() - 1) {}
 
     SampleValueMipMapOp(const SampleValueMipMapOp& other)
@@ -379,7 +378,7 @@ struct SampleValueMipMapOp
         , mValueTransform(other.mValueTransform)
         , mPositionTransform(other.mPositionTransform)
         , mMipTransform(other.mMipTransform)
-        , mMipOffset(other.mMipOffset)
+        , mBias(other.mBias)
         , mMaxMipLevel(other.mMaxMipLevel) {}
 
     template<typename NodeT>
@@ -391,11 +390,15 @@ struct SampleValueMipMapOp
         for (auto iter = node.beginValueOn(); iter; ++iter) {
             const openvdb::Coord ijk = iter.getCoord();
             const openvdb::Vec3R pos = mPositionAccessor.getValue(ijk);
-            const float mipLevel = mipSampler(ijk) - mMipOffset; // this used to account for transform differences (and biasing)
+            const openvdb::Vec3d& valueISPos = mValueTransform.worldToIndex(pos);
+            // calculate the mip scale based on the ratio of resolutions between the source transform and the target grid
+            // log_2 (source / target) for linear transforms (this will be added to the mip level, because log(ab) = log(a) + log(b))
+            const float offset = (1.0 / 3.0) * std::log2(mValueTransform.voxelSize(valueISPos).product() / mPositionTransform.voxelSize(ijk.asVec3d()).product());
+            const float mipLevel = mipSampler(ijk) - offset - mBias; // this used to account for transform differences (and biasing)
             if (mipLevel > 0.0f) {
-                iter.setValue(multiResGridSampler.template sampleValue<MipSamplerOrder>(mValueTransform.worldToIndex(pos), openvdb::math::Min(mipLevel, mMaxMipLevel)));
+                iter.setValue(multiResGridSampler.template sampleValue<MipSamplerOrder>(valueISPos, openvdb::math::Min(mipLevel, mMaxMipLevel)));
             }
-            else iter.setValue(multiResGridSampler.template sampleTop<SamplerOrder>(mValueTransform.worldToIndex(pos)));
+            else iter.setValue(multiResGridSampler.template sampleTop<SamplerOrder>(valueISPos));
         }
     }
     const MultiResGridT& mValueGrid;
@@ -404,7 +407,7 @@ struct SampleValueMipMapOp
     const openvdb::math::Transform& mValueTransform;
     const openvdb::math::Transform& mPositionTransform;
     const openvdb::math::Transform& mMipTransform;
-    const float mMipOffset;
+    const float mBias;
     const float mMaxMipLevel;
 };
 
@@ -432,12 +435,8 @@ struct AASampleOp
 
         if (mMipLevel) {
             openvdb::tools::MultiResGrid<TreeT> valuesMultiRes(mMipLevels, values);
-            // calculate the mip scale based on the ratio of resolutions between the source transform and the target grid
-            // log_2 (source / target) for linear transforms (this will be added to the mip level, because log(ab) = log(a) + log(b))
-            // @todo: frustum transforms
-            const float mipOffset = std::log2(values.transform().voxelSize().x() / mPositions.transform().voxelSize().x());
             SampleValueMipMapOp<TreeT, PositionGridT, SamplerOrder, MipSamplerOrder>
-                sampleOp(valuesMultiRes, mPositions, *mMipLevel, mipOffset, mBias);
+                sampleOp(valuesMultiRes, mPositions, *mMipLevel, mBias);
             manager.foreachBottomUp(sampleOp);
         }
         else {
@@ -505,6 +504,7 @@ openvdb::FloatGrid::ConstPtr mipLevel = nullptr, const SamplerTypes mipSampleTyp
 //This stores the mip map level calculation in a grid for reuse
 //The edge voxels may have incorrect values so will be eroded/reset to background
 //@todo: consider reverting to FD_1ST and BD_1ST on voxels bordering inactive regions
+//@todo: get typed map to avoid virtual function call
 template<typename PositionGridT>
 struct MipLevelOp
 {
@@ -513,7 +513,7 @@ struct MipLevelOp
 
     MipLevelOp(const PositionGridT& posGrid)
         : mStencil(posGrid)
-        , mVoxelSizeInv(1.0 / posGrid.transform().voxelSize().x()) {}
+        , mMap(posGrid.transform().baseMap().get()) {}
 
     template <typename LeafT>
     void operator()(LeafT& leaf, size_t) const
@@ -526,9 +526,11 @@ struct MipLevelOp
             PositionT dPdy(DiffType::inY(mStencil, 0), DiffType::inY(mStencil, 1), DiffType::inY(mStencil, 2));
             PositionT dPdz(DiffType::inZ(mStencil, 0), DiffType::inZ(mStencil, 1), DiffType::inZ(mStencil, 2));
             // convert to world space
-            dPdx *= mVoxelSizeInv;
-            dPdy *= mVoxelSizeInv;
-            dPdz *= mVoxelSizeInv;
+            assert(mMap);
+            const openvdb::Vec3d& pos = ijk.asVec3d();
+            dPdx = mMap->applyIJT(dPdx, pos);
+            dPdy = mMap->applyIJT(dPdy, pos);
+            dPdz = mMap->applyIJT(dPdz, pos);
 
             // equivalent to log2(max(length(dx,dy,dz))) but avoids sqrt
             const float logMaxLengthSqr = 0.5f * std::log2(openvdb::math::Max(dPdx.lengthSqr(), dPdy.lengthSqr(), dPdz.lengthSqr()));
@@ -538,7 +540,7 @@ struct MipLevelOp
     }
 
     mutable openvdb::math::SevenPointStencil<PositionGridT> mStencil;
-    const float mVoxelSizeInv; // @todo: replace with proper transform handling for frustum grids
+    const openvdb::math::MapBase* mMap;
 };
 
 template<typename PositionGridT>
@@ -640,10 +642,6 @@ SOP_OpenVDB_Sample_From_Volume::Cache::cookVDBSop(OP_Context& context)
         openvdb::FloatGrid::Ptr newMipLevel;
         openvdb::FloatGrid::ConstPtr mipLevel;
         if (useMipMaps) {
-
-            if (!positions.transform().isLinear()) {
-                addWarning(SOP_MESSAGE, "Nonlinear transform on positions VDB not yet supported in mip level calculation, results may be inaccurate.");
-            }
 
             // if mip level has been input, use it, otherwise calculate it
             const GU_Detail* thirdInput = inputGeo(2);
