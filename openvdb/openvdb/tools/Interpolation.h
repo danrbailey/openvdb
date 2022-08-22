@@ -285,6 +285,27 @@ struct StaggeredQuadraticSampler
     static typename TreeT::ValueType sample(const TreeT& inTree, const Vec3R& inCoord);
 };
 
+struct StaggeredCubicSampler
+{
+    static const char* name() { return "cubic"; }
+    static int radius() { return 2; }
+    static bool mipmap() { return true; }
+    static bool consistent() { return false; }
+    static bool staggered() { return true; }
+    static size_t order() { return 3; }
+
+    /// @brief Tricubically reconstruct @a inTree at @a inCoord
+    /// and store the result in @a result.
+    /// @return true if any one of the sampled values is active.
+    template<class TreeT>
+    static bool sample(const TreeT& inTree, const Vec3R& inCoord,
+                       typename TreeT::ValueType& result);
+
+    /// @brief Tricubically reconstruct @a inTree at to @a inCoord.
+    /// @return the reconstructed value
+    template<class TreeT>
+    static typename TreeT::ValueType sample(const TreeT& inTree, const Vec3R& inCoord);
+};
 
 //////////////////////////////////////// GridSampler
 

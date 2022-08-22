@@ -5,7 +5,7 @@
 ///
 /// @author Richard Jones, Mary Ferrante
 ///
-/// @brief SOP to sample a volume in positions defined in volume values of another.
+/// @brief SOP to sample a volume in positions defined in volume values of another, with anti-aliasing if required.
 
 #include <houdini_utils/ParmFactory.h>
 #include <openvdb/math/Math.h>
@@ -19,7 +19,6 @@
 #include <openvdb_houdini/SOP_NodeVDB.h>
 #include <UT/UT_Interrupt.h>
 #include <stdexcept>
-
 
 
 namespace hvdb = openvdb_houdini;
@@ -91,7 +90,7 @@ newSopOperator(OP_OperatorTable* table)
             "point",     "Nearest",
             "linear",    "Linear",
             "quadratic", "Quadratic",
-            "cubic",     "Cubic"
+            "cubic", "Cubic"
         })
         .setDocumentation("\
 How to interpolate values at fractional voxel positions\n\
@@ -104,7 +103,10 @@ Linear:\n\
     This matches what [Node:sop/volumemix] and [Vex:volumesample] do.\n\
 Quadratic:\n\
     Interpolate triquadratically between the values of neighbors.\n\n\
-    This produces smoother results than trilinear interpolation but is slower.\n"));
+    This produces smoother results than trilinear interpolation but is slower.\n\
+Cubic:\n\
+    Interpolate tricubically between the values of neighbors.\n\n\
+    This produces smoother results than triquadratic interpolation but is slower still.\n"));
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "mipmap", "Use Anti-Aliasing")
         .setDefault(PRMoneDefaults)
@@ -115,7 +117,8 @@ Quadratic:\n\
         .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
             "point",     "Nearest",
             "linear",    "Linear",
-            "quadratic", "Quadratic"
+            "quadratic", "Quadratic",
+            "cubic", "Cubic"
         })
         .setDocumentation("\
 How to interpolate values at fractional voxel positions in the mip map stack.\n\
@@ -130,7 +133,7 @@ Quadratic:\n\
     Interpolate triquadratically between the values of neighbors.\n\n\
     This produces smoother results than trilinear interpolation but is slower.\n\
 Cubic:\n\
-    Interpolate tricubically between the values of neighbors (and their neighbours).\n\n\
+    Interpolate tricubically between the values of neighbors.\n\n\
     This produces smoother results than triquadratic interpolation but is slower still.\n"));
 
     parms.add(hutil::ParmFactory(PRM_INT_J, "miplevels", "Mip Map Levels")
