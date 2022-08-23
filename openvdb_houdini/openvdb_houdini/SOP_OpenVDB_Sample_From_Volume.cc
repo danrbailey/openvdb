@@ -412,9 +412,9 @@ struct SampleValueMipMapOp
 };
 
 template<typename PositionGridT, int SamplerOrder, int MipSamplerOrder>
-struct AASampleOp
+struct SampleVolumeOp
 {
-    AASampleOp(openvdb::GridBase::Ptr outGrid,
+    SampleVolumeOp(openvdb::GridBase::Ptr outGrid,
         const PositionGridT& positions,
         openvdb::FloatGrid::ConstPtr mipLevel = nullptr,
         const int mipLevels = 0,
@@ -458,7 +458,7 @@ openvdb::GridBase::Ptr doSample(const openvdb::GridBase& values, const PositionG
 openvdb::FloatGrid::ConstPtr mipLevel = nullptr, const int mipLevels = 0, const float bias = 0.0f)
 {
     openvdb::GridBase::Ptr outGrid = values.copyGridWithNewTree();
-    AASampleOp<PositionGridT, SamplerOrder, MipSamplerOrder> op(outGrid, positions, mipLevel, mipLevels, bias);
+    SampleVolumeOp<PositionGridT, SamplerOrder, MipSamplerOrder> op(outGrid, positions, mipLevel, mipLevels, bias);
 
     using SampleableGridTypes = openvdb_houdini::NumericGridTypes::Append<openvdb_houdini::Vec3GridTypes>;
     values.apply<SampleableGridTypes>(op);
@@ -657,6 +657,8 @@ SOP_OpenVDB_Sample_From_Volume::Cache::cookVDBSop(OP_Context& context)
             }
             else {
                 newMipLevel = calculateMipLevel(positions);
+                if (deactivate) UTvdbCallAllType(UT_VDB_FLOAT, doDeactivate, *newMipLevel, deactivateTol);
+                if (prune) UTvdbCallAllType(UT_VDB_FLOAT, doPrune, *newMipLevel, pruneTol);
                 mipLevel = newMipLevel;
             }
         }
@@ -666,24 +668,21 @@ SOP_OpenVDB_Sample_From_Volume::Cache::cookVDBSop(OP_Context& context)
             const openvdb::GridBase& values = it->getConstGrid();
             openvdb::GridBase::Ptr newGrid = doSample(values, positions, samplerType,
                 mipLevel, mipSampleType, mipLevels, mipBias);
-            if (newGrid){
-                // Rename grid
-                std::string gridName = (*it)->getGridName();
-                const auto renaming = evalStdString("outputname", time);
-                if (renaming == "append") {
-                    gridName += "_sampled";
-                } else if (renaming == "custom") {
-                    const auto customName = evalStdString("customname", time);
-                    if (!customName.empty()) gridName = customName;
-                }
-                if (deactivate) UTvdbCallAllType(UTvdbGetGridType(*newGrid), doDeactivate, *newGrid, deactivateTol);
-                if (prune) UTvdbCallAllType(UTvdbGetGridType(*newGrid), doPrune, *newGrid, pruneTol);
-                hvdb::replaceVdbPrimitive(*gdp, newGrid, **it, true, gridName.c_str());
+            assert(newGrid);
+            // Rename grid
+            std::string gridName = (*it)->getGridName();
+            const auto renaming = evalStdString("outputname", time);
+            if (renaming == "append") {
+                gridName += "_sampled";
+            } else if (renaming == "custom") {
+                const auto customName = evalStdString("customname", time);
+                if (!customName.empty()) gridName = customName;
             }
+            if (deactivate) UTvdbCallAllType(UTvdbGetGridType(*newGrid), doDeactivate, *newGrid, deactivateTol);
+            if (prune) UTvdbCallAllType(UTvdbGetGridType(*newGrid), doPrune, *newGrid, pruneTol);
+            hvdb::replaceVdbPrimitive(*gdp, newGrid, **it, true, gridName.c_str());
 
             if (newMipLevel && outputMip) {
-                if (deactivate) UTvdbCallAllType(UT_VDB_FLOAT, doDeactivate, *newMipLevel, deactivateTol);
-                if (prune) UTvdbCallAllType(UT_VDB_FLOAT, doPrune, *newMipLevel, pruneTol);
                 hvdb::createVdbPrimitive(*gdp, newMipLevel, "miplevel");
             }
         }
