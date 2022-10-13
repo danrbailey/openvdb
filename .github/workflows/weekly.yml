@@ -385,7 +385,7 @@ jobs:
         cd abi-compliance-checker && git checkout 7c175c45a8ba9ac41b8e47d8ebbab557b623b18e && cd -
     - name: build_latest
       run: >
-        CXXFLAGS=-Og ./ci/build.sh -v
+        CXXFLAGS=-Og sudo ./ci/build.sh -v
         --build-dir=build_latest
         --build-type=Debug
         --target=openvdb_shared
@@ -395,7 +395,7 @@ jobs:
       run: git checkout v${VDB_MAJOR_VERSION}.0.0
     - name: build_baseline
       run: >
-        CXXFLAGS=-Og ./ci/build.sh -v
+        CXXFLAGS=-Og sudo ./ci/build.sh -v
         --build-type=Debug
         --target=openvdb_shared
         --components=\"core\"
