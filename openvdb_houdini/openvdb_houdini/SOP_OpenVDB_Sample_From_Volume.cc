@@ -31,6 +31,10 @@ enum class SamplerTypes {
     S_CUBIC
 };
 
+enum class MipCalcType {
+    MAX = 0,
+    AVE
+};
 
 class SOP_OpenVDB_Sample_From_Volume: public hvdb::SOP_NodeVDB
 {
@@ -140,6 +144,20 @@ Cubic:\n\
         .setDefault(PRMthreeDefaults)
         .setRange(PRM_RANGE_RESTRICTED, 2, PRM_RANGE_UI, 10)
         .setTooltip("The number of mip-maps of decreasing resolution to generate. Mip level calculation will be clamped to this value."));
+
+    parms.add(hutil::ParmFactory(PRM_ORD, "mipcalc", "Mip Level Calculation")
+        .setDefault(PRMzeroDefaults)
+        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
+            "max",     "Max",
+            "average", "Average",
+        })
+        .setDocumentation("\
+How to calculate the mip level from the gradient of the positions to sample.\n\
+\n\
+Max:\n\
+    Use the componentwise maximum.\n\n\
+Average:\n\
+    Use the average of all components.\n"));
 
     parms.add(hutil::ParmFactory(PRM_FLT_J, "mipbias", "Bias")
         .setDefault(PRMzeroDefaults)
@@ -263,6 +281,7 @@ SOP_OpenVDB_Sample_From_Volume::updateParmsFlags()
 
     changed |= enableParm("mipfilter", useMipMaps);
     changed |= enableParm("miplevels", useMipMaps);
+    changed |= enableParm("mipcalc", useMipMaps);
     changed |= enableParm("mipbias", useMipMaps);
     changed |= enableParm("miplevel", useMipMaps && !outputMipLevel);
     changed |= enableParm("outputmiplevel", useMipMaps);
@@ -500,16 +519,43 @@ openvdb::FloatGrid::ConstPtr mipLevel = nullptr, const SamplerTypes mipSampleTyp
     else throw std::runtime_error("Unsupported positions grid type for sample from volume.");
 }
 
+// Different Mip Level Calculations
+// Standard practice e.g. OpenGL, use a max componentwise calculation but for non-standard grids e.g. frustum grids it may 
+// be preferable to use an average of all the components or some other method. This is configurable with the MipT template.
+
+struct MaxMip {
+    template <typename ValueT>
+    static inline ValueT get(
+        const openvdb::math::Vec3<ValueT>& dPdx, 
+        const openvdb::math::Vec3<ValueT>& dPdy, 
+        const openvdb::math::Vec3<ValueT>& dPdz)
+    {
+        // equivalent to log2(max(length(dx,dy,dz))) but avoids sqrt
+        return  0.5f * std::log2(openvdb::math::Max(dPdx.lengthSqr(), dPdy.lengthSqr(), dPdz.lengthSqr()));
+    }
+};
+
+struct AverageMip {
+    template <typename ValueT>
+    static inline ValueT get(
+        const openvdb::math::Vec3<ValueT>& dPdx,
+        const openvdb::math::Vec3<ValueT>& dPdy,
+        const openvdb::math::Vec3<ValueT>& dPdz)
+    {
+        return  std::log2((dPdx.length() + dPdy.length() + dPdz.length()) / 3.0);
+    }
+};
 
 //This stores the mip map level calculation in a grid for reuse
 //The edge voxels may have incorrect values so will be eroded/reset to background
 //@todo: consider reverting to FD_1ST and BD_1ST on voxels bordering inactive regions
 //@todo: get typed map to avoid virtual function call
-template<typename PositionGridT>
+template<typename PositionGridT, typename MipCalcT>
 struct MipLevelOp
 {
     using DiffType = openvdb::math::D1Vec<openvdb::math::CD_2ND>;
     using PositionT = typename PositionGridT::ValueType;
+    using ElementType = typename openvdb::VecTraits<PositionT>::ElementType;
 
     MipLevelOp(const PositionGridT& posGrid)
         : mStencil(posGrid)
@@ -532,10 +578,9 @@ struct MipLevelOp
             dPdy = mMap->applyIJT(dPdy, pos);
             dPdz = mMap->applyIJT(dPdz, pos);
 
-            // equivalent to log2(max(length(dx,dy,dz))) but avoids sqrt
-            const float logMaxLengthSqr = 0.5f * std::log2(openvdb::math::Max(dPdx.lengthSqr(), dPdy.lengthSqr(), dPdz.lengthSqr()));
+            const float mipLevel = MipCalcT::get(dPdx, dPdy, dPdz);
             // calculate mip level to sample
-            iter.setValue(logMaxLengthSqr);
+            iter.setValue(mipLevel);
         }
     }
 
@@ -543,17 +588,15 @@ struct MipLevelOp
     const openvdb::math::MapBase* mMap;
 };
 
-template<typename PositionGridT>
-openvdb::FloatGrid::Ptr calculateMipLevel(const openvdb::GridBase& positions) {
-
-    const PositionGridT& positionGrid = UTvdbGridCast<const PositionGridT>(positions);
-
+template<typename PositionGridT, typename MipCalcT>
+openvdb::FloatGrid::Ptr calculateMipLevelTyped(const PositionGridT& positions) 
+{
     openvdb::FloatGrid::Ptr newGrid = openvdb::FloatGrid::create();
-    newGrid->setTransform(positionGrid.transform().copy());
-    newGrid->topologyUnion(positionGrid);
+    newGrid->setTransform(positions.transform().copy());
+    newGrid->topologyUnion(positions);
     newGrid->tree().voxelizeActiveTiles();
 
-    MipLevelOp<PositionGridT> mipLevelOp(positionGrid);
+    MipLevelOp<PositionGridT, MipCalcT> mipLevelOp(positions);
     openvdb::FloatTree& tree = newGrid->tree();
     openvdb::tree::LeafManager<openvdb::FloatTree> manager(tree);
     manager.foreach(mipLevelOp);
@@ -571,10 +614,19 @@ openvdb::FloatGrid::Ptr calculateMipLevel(const openvdb::GridBase& positions) {
     return newGrid;
 }
 
-inline openvdb::FloatGrid::Ptr calculateMipLevel(const openvdb::GridBase& positions)
+template <typename PositionGridT>
+inline openvdb::FloatGrid::Ptr calculateMipLevelTyped(const openvdb::GridBase& positions, const MipCalcType mipLevelType)
 {
-    if (positions.valueType() == openvdb::typeNameAsString<openvdb::Vec3f>()) return calculateMipLevel<openvdb::Vec3fGrid>(positions);
-    else if (positions.valueType() == openvdb::typeNameAsString<openvdb::Vec3d>()) return calculateMipLevel<openvdb::Vec3dGrid>(positions);
+    const PositionGridT& positionGrid = UTvdbGridCast<const PositionGridT>(positions);
+    if (mipLevelType == MipCalcType::MAX) return calculateMipLevelTyped<PositionGridT, MaxMip>(positionGrid);
+    else if (mipLevelType == MipCalcType::AVE) return calculateMipLevelTyped<PositionGridT, AverageMip>(positionGrid);
+    else throw std::runtime_error("Unsupported mip level calculation type.");
+}
+
+inline openvdb::FloatGrid::Ptr calculateMipLevel(const openvdb::GridBase& positions, const MipCalcType mipCalcType)
+{
+    if (positions.valueType() == openvdb::typeNameAsString<openvdb::Vec3f>()) return calculateMipLevelTyped<openvdb::Vec3fGrid>(positions, mipCalcType);
+    else if (positions.valueType() == openvdb::typeNameAsString<openvdb::Vec3d>()) return calculateMipLevelTyped<openvdb::Vec3dGrid>(positions, mipCalcType);
     else throw std::runtime_error("Unsupported positions grid type for calculating mip level.");
 }
 
@@ -634,6 +686,8 @@ SOP_OpenVDB_Sample_From_Volume::Cache::cookVDBSop(OP_Context& context)
         const bool outputMip  = useMipMaps ? static_cast<bool>(evalInt("outputmiplevel", 0, time)) : false;
         const SamplerTypes mipSampleType  = useMipMaps ?
             static_cast<SamplerTypes>(evalInt("mipfilter", 0, time)) : SamplerTypes::S_POINT;
+        const MipCalcType mipCalcType  = useMipMaps ?
+            static_cast<MipCalcType>(evalInt("mipcalc", 0, time)) : MipCalcType::MAX;
         const float deactivate = static_cast<bool>(evalInt("deactivate", 0, time));
         const float prune = static_cast<bool>(evalInt("prune", 0, time));
         const float deactivateTol = deactivate ? evalFloat("deactivatetol", 0, time) : 0.0f;
@@ -656,7 +710,7 @@ SOP_OpenVDB_Sample_From_Volume::Cache::cookVDBSop(OP_Context& context)
                 if (outputMip) addWarning(SOP_MESSAGE, "Mip level VDB on third input, Output Mip Level will be ignored.");
             }
             else {
-                newMipLevel = calculateMipLevel(positions);
+                newMipLevel = calculateMipLevel(positions, mipCalcType);
                 if (deactivate) UTvdbCallAllType(UT_VDB_FLOAT, doDeactivate, *newMipLevel, deactivateTol);
                 if (prune) UTvdbCallAllType(UT_VDB_FLOAT, doPrune, *newMipLevel, pruneTol);
                 mipLevel = newMipLevel;
