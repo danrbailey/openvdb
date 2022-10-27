@@ -199,7 +199,7 @@ struct CubicSampler
     static bool sample(const TreeT& inTree, const Vec3R& inCoord,
                        typename TreeT::ValueType& result);
 
-    /// @brief Triquadratically reconstruct @a inTree at to @a inCoord.
+    /// @brief Tricubically reconstruct @a inTree at to @a inCoord.
     /// @return the reconstructed value
     template<class TreeT>
     static typename TreeT::ValueType sample(const TreeT& inTree, const Vec3R& inCoord);
@@ -980,14 +980,17 @@ CubicSampler::tricubicInterpolation(ValueT (&data)[N][N][N], const Vec3R& uvw)
     {
         OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
         // p[1] + 0.5 * x*(p[2] - p[0] + x*(2.0*p[0] - 5.0*p[1] + 4.0*p[2] - p[3] + x*(3.0*(p[1] - p[2]) + p[3] - p[0])));
-        const ValueT temp = value[1] + 0.5 * weight * (value[2] - value[0]
-            + weight * (2.0 * value[0] - 5.0 * value[1] + 4.0 * value[2] - value[3]
-                + weight * (3.0 * (value[1] - value[2]) + value[3] - value[0])));
+        const ValueT temp = value[1] +
+                            0.5 * weight * (value[2] - value[0] +
+                                weight * (2.0 * value[0] - 5.0 * value[1] + 4.0 * value[2] - value[3] +
+                                    weight * (3.0 * (value[1] - value[2]) + value[3] - value[0])
+                                )
+                            );
         OPENVDB_NO_TYPE_CONVERSION_WARNING_END
         return static_cast<ValueT>(temp);
     };
 
-    auto _bicubicInterpolate = [&_interpolate](ValueT p[4][4], Vec3R::ValueType x, Vec3R::ValueType y){
+    auto _bicubicInterpolate = [&_interpolate](const ValueT (&p)[4][4], Vec3R::ValueType x, Vec3R::ValueType y){
         ValueT arr[4];
         arr[0] = _interpolate(p[0], y);
         arr[1] = _interpolate(p[1], y);
@@ -1119,6 +1122,45 @@ StaggeredQuadraticSampler::sample(const TreeT& inTree, const Vec3R& inCoord)
     return ValueT(tempX.x(), tempY.y(), tempZ.z());
 }
 
+
+//////////////////////////////////////// StaggeredCubicSampler
+
+
+template<class TreeT>
+inline bool
+StaggeredCubicSampler::sample(const TreeT& inTree, const Vec3R& inCoord,
+    typename TreeT::ValueType& result)
+{
+    using ValueType = typename TreeT::ValueType;
+
+    ValueType tempX, tempY, tempZ;
+    bool active = false;
+
+    active = CubicSampler::sample<TreeT>(inTree, inCoord + Vec3R(0.5, 0, 0), tempX) || active;
+    active = CubicSampler::sample<TreeT>(inTree, inCoord + Vec3R(0, 0.5, 0), tempY) || active;
+    active = CubicSampler::sample<TreeT>(inTree, inCoord + Vec3R(0, 0, 0.5), tempZ) || active;
+
+    result.x() = tempX.x();
+    result.y() = tempY.y();
+    result.z() = tempZ.z();
+
+    return active;
+}
+
+template<class TreeT>
+inline typename TreeT::ValueType
+StaggeredCubicSampler::sample(const TreeT& inTree, const Vec3R& inCoord)
+{
+    using ValueT = typename TreeT::ValueType;
+
+    const ValueT tempX = CubicSampler::sample<TreeT>(inTree, inCoord + Vec3R(0.5, 0.0, 0.0));
+    const ValueT tempY = CubicSampler::sample<TreeT>(inTree, inCoord + Vec3R(0.0, 0.5, 0.0));
+    const ValueT tempZ = CubicSampler::sample<TreeT>(inTree, inCoord + Vec3R(0.0, 0.0, 0.5));
+
+    return ValueT(tempX.x(), tempY.y(), tempZ.z());
+}
+
+
 //////////////////////////////////////// Sampler
 
 template <>
@@ -1141,6 +1183,9 @@ struct Sampler<1, true> : public StaggeredBoxSampler {};
 
 template <>
 struct Sampler<2, true> : public StaggeredQuadraticSampler {};
+
+template <>
+struct Sampler<3, true> : public StaggeredCubicSampler {};
 
 } // namespace tools
 } // namespace OPENVDB_VERSION_NAME
