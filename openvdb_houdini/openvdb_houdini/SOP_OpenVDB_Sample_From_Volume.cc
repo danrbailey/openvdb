@@ -97,7 +97,7 @@ newSopOperator(OP_OperatorTable* table)
             "cubic", "Cubic"
         })
         .setDocumentation("\
-How to interpolate values at fractional voxel positions\n\
+How to interpolate values at fractional voxel positions.\n\
 \n\
 Nearest:\n\
     Use the value from the nearest voxel.\n\n\
@@ -111,69 +111,6 @@ Quadratic:\n\
 Cubic:\n\
     Interpolate tricubically between the values of neighbors.\n\n\
     This produces smoother results than triquadratic interpolation but is slower still.\n"));
-
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "mipmap", "Use Anti-Aliasing")
-        .setDefault(PRMoneDefaults)
-        .setTooltip("Use mip-mapping to reduce aliasing."));
-
-    parms.add(hutil::ParmFactory(PRM_ORD, "mipfilter", "Mip Map Filter")
-        .setDefault(PRMoneDefaults)
-        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
-            "point",     "Nearest",
-            "linear",    "Linear",
-            "quadratic", "Quadratic",
-            "cubic", "Cubic"
-        })
-        .setDocumentation("\
-How to interpolate values at fractional voxel positions in the mip map stack.\n\
-\n\
-Nearest:\n\
-    Use the value from the nearest voxel.\n\n\
-    This is fast but can cause aliasing artifacts.\n\
-Linear:\n\
-    Interpolate trilinearly between the values of immediate neighbors.\n\n\
-    This matches what [Node:sop/volumemix] and [Vex:volumesample] do.\n\
-Quadratic:\n\
-    Interpolate triquadratically between the values of neighbors.\n\n\
-    This produces smoother results than trilinear interpolation but is slower.\n\
-Cubic:\n\
-    Interpolate tricubically between the values of neighbors.\n\n\
-    This produces smoother results than triquadratic interpolation but is slower still.\n"));
-
-    parms.add(hutil::ParmFactory(PRM_INT_J, "miplevels", "Mip Map Levels")
-        .setDefault(PRMthreeDefaults)
-        .setRange(PRM_RANGE_RESTRICTED, 2, PRM_RANGE_UI, 10)
-        .setTooltip("The number of mip-maps of decreasing resolution to generate. Mip level calculation will be clamped to this value."));
-
-    parms.add(hutil::ParmFactory(PRM_ORD, "mipcalc", "Mip Level Calculation")
-        .setDefault(PRMzeroDefaults)
-        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
-            "max",     "Max",
-            "average", "Average",
-        })
-        .setDocumentation("\
-How to calculate the mip level from the gradient of the positions to sample.\n\
-\n\
-Max:\n\
-    Use the componentwise maximum.\n\n\
-Average:\n\
-    Use the average of all components.\n"));
-
-    parms.add(hutil::ParmFactory(PRM_FLT_J, "mipbias", "Bias")
-        .setDefault(PRMzeroDefaults)
-        .setRange(PRM_RANGE_UI, -4, PRM_RANGE_UI, 4)
-        .setTooltip("Amount to bias the mip level calculation in favour of lower levels. Note this does not get baked into the mip level output."));
-
-    parms.add(hutil::ParmFactory(PRM_STRING, "miplevel", "Mip Level Group")
-        .setChoiceList(&hutil::PrimGroupMenuInput3)
-        .setTooltip("Optional grid to use as the mip level calculation, if no grid is found this will be re-calculated."
-                    " This is useful for optimising setups that use the same sample position grids.")
-        .setDocumentation("Optional grid to use as the mip level calculation, if no grid is found this will be re-calculated."
-                    " This is useful for optimising setups that use the same sample position grids."));
-
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "outputmiplevel", "Output Mip Level")
-        .setDefault(PRMzeroDefaults)
-        .setTooltip("Output the mip level calculation as a float VDB with the same topology as the input position VDB."));
 
     // Deactivate background value toggle
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "deactivate", "Deactivate Background Voxels")
@@ -220,6 +157,76 @@ Average:\n\
         .setDocumentation(
             "When pruning is enabled, voxel values are considered equal"
             " if they differ by less than the specified tolerance."));
+
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "mipmap", "Use Anti-Aliasing")
+        .setDefault(PRMoneDefaults)
+        .setTooltip("Use mip-mapping to reduce aliasing."));
+
+    parms.beginSwitcher("Group1");
+    parms.addFolder("Mip Maps");
+
+    parms.add(hutil::ParmFactory(PRM_ORD, "mipfilter", "Mip Map Filter")
+        .setDefault(PRMoneDefaults)
+        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
+            "point",     "Nearest",
+            "linear",    "Linear",
+            "quadratic", "Quadratic",
+            "cubic", "Cubic"
+        })
+        .setTooltip("How to interpolate values at fractional voxel positions in the mip map stack.")
+        .setDocumentation("\
+How to interpolate values at fractional voxel positions in the mip map stack.\n\
+\n\
+Nearest:\n\
+    Use the value from the nearest voxel.\n\n\
+    This is fast but can cause aliasing artifacts.\n\
+Linear:\n\
+    Interpolate trilinearly between the values of immediate neighbors.\n\n\
+    This matches what [Node:sop/volumemix] and [Vex:volumesample] do.\n\
+Quadratic:\n\
+    Interpolate triquadratically between the values of neighbors.\n\n\
+    This produces smoother results than trilinear interpolation but is slower.\n\
+Cubic:\n\
+    Interpolate tricubically between the values of neighbors.\n\n\
+    This produces smoother results than triquadratic interpolation but is slower still.\n"));
+
+    parms.add(hutil::ParmFactory(PRM_INT_J, "miplevels", "Mip Map Levels")
+        .setDefault(PRMthreeDefaults)
+        .setRange(PRM_RANGE_RESTRICTED, 2, PRM_RANGE_UI, 10)
+        .setTooltip("The number of mip-maps of decreasing resolution to generate. Mip level calculation will be clamped to this value."));
+
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "mipbias", "Mip Bias")
+        .setDefault(PRMzeroDefaults)
+        .setRange(PRM_RANGE_UI, -4, PRM_RANGE_UI, 4)
+        .setTooltip("Amount to bias the mip level calculation in favour of lower levels. Note this does not get baked into the mip level output."));
+
+    parms.add(hutil::ParmFactory(PRM_ORD, "mipcalc", "Mip Level Calculation")
+        .setDefault(PRMzeroDefaults)
+        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
+            "max",     "Max",
+            "average", "Average",
+        })
+        .setTooltip("How to calculate the mip level from the gradient of the positions to sample.")
+        .setDocumentation("\
+How to calculate the mip level from the gradient of the positions to sample.\n\
+\n\
+Max:\n\
+    Use the componentwise maximum.\n\n\
+Average:\n\
+    Use the average of all components.\n"));
+
+    parms.add(hutil::ParmFactory(PRM_STRING, "miplevel", "Mip Level Group")
+        .setChoiceList(&hutil::PrimGroupMenuInput3)
+        .setTooltip("Optional grid to use as the mip level calculation, if no grid is found this will be re-calculated."
+                    " This is useful for optimising setups that use the same sample position grids.")
+        .setDocumentation("Optional grid to use as the mip level calculation, if no grid is found this will be re-calculated."
+                    " This is useful for optimising setups that use the same sample position grids."));
+
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "outputmiplevel", "Output Mip Level")
+        .setDefault(PRMzeroDefaults)
+        .setTooltip("Output the mip level calculation as a float VDB with the same topology as the input position VDB."));
+    
+    parms.endSwitcher();
 
     hvdb::OpenVDBOpFactory("VDB Sample From Volume", SOP_OpenVDB_Sample_From_Volume::factory, parms, *table)
         .setNativeName("")
