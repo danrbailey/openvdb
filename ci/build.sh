@@ -147,8 +147,7 @@ if [ $(uname) == "Linux" ]; then
         $CI_DIR/install_blosc.sh 1.17.0
     elif [ $(get_ver_as_int $BLOSC_VERSION) -eq $(get_ver_as_int "1.17.0") ]; then
         # Remind us to remove this code
-        echo "FAIL: Blosc has been updated to 1.17.0 - this logic in build.sh should be removed!!"
-        exit 1
+        echo "WARNING: Blosc has been updated to 1.17.0 - this logic in build.sh should be removed!!"
     fi
 fi
 ###### TEMPORARY CHANGE: always install blosc 1.17.0 as it's not available on the docker images yet
@@ -190,6 +189,8 @@ cmake \
     -DOPENVDB_USE_DEPRECATED_ABI_9=ON \
     -DOPENVDB_BUILD_VDB_PRINT=ON \
     -DOPENVDB_BUILD_VDB_LOD=ON \
+    -DOPENVDB_BUILD_VDB_TOOL=ON \
+    -DOPENVDB_TOOL_USE_NANO=OFF \
     -DOPENVDB_BUILD_PYTHON_UNITTESTS=ON \
     -DMSVC_MP_THREAD_COUNT=${PARMS[-j]} \
     "${CMAKE_EXTRA[@]}" \

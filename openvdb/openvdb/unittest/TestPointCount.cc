@@ -288,8 +288,7 @@ TEST_F(TestPointCount, testGroup)
 
         // write out grid to a temp file
         {
-            io::TempFile file;
-            filename = file.filename();
+            filename = "testPointCount1.vdb";
             io::File fileOut(filename);
             GridCPtrVec grids{grid};
             fileOut.write(grids);
@@ -315,7 +314,9 @@ TEST_F(TestPointCount, testGroup)
 
             GroupFilter groupFilter("test", attributeSet);
 
-            bool inCoreOnly = true;
+            bool inCoreOnly;
+#ifdef OPENVDB_USE_DELAYED_LOADING
+            inCoreOnly = true;
 
             EXPECT_EQ(pointCount(inputTree, NullFilter(), inCoreOnly), Index64(0));
             EXPECT_EQ(pointCount(inputTree, ActiveFilter(), inCoreOnly), Index64(0));
@@ -325,6 +326,7 @@ TEST_F(TestPointCount, testGroup)
                 groupFilter, ActiveFilter()), inCoreOnly), Index64(0));
             EXPECT_EQ(pointCount(inputTree, BinaryFilter<GroupFilter, InactiveFilter>(
                 groupFilter, InactiveFilter()), inCoreOnly), Index64(0));
+#endif
 
             inCoreOnly = false;
 
@@ -521,13 +523,13 @@ TEST_F(TestPointCount, testOffsets)
 
     // write out grid to a temp file
     {
-        io::TempFile file;
-        filename = file.filename();
+        filename = "testPointCount1.vdb";
         io::File fileOut(filename);
         GridCPtrVec grids{grid};
         fileOut.write(grids);
     }
 
+#ifdef OPENVDB_USE_DELAYED_LOADING
     // test point offsets for a delay-loaded grid
     {
         io::File fileIn(filename);
@@ -570,6 +572,7 @@ TEST_F(TestPointCount, testOffsets)
         EXPECT_EQ(offsets[3], Index64(5));
         EXPECT_EQ(total, Index64(5));
     }
+#endif
 
     std::remove(filename.c_str());
 }
