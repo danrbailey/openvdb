@@ -109,13 +109,14 @@ jobs:
       matrix:
         config:
           - { name: 'all',   build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DUSE_BLOSC=ON  -DUSE_ZLIB=ON  -DUSE_EXR=ON  -DUSE_PNG=ON'  }
-          - { name: 'lite',  build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DUSE_BLOSC=OFF -DUSE_ZLIB=OFF -DUSE_EXR=OFF -DUSE_PNG=OFF' }
+          - { name: 'lite',  build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DUSE_BLOSC=OFF -DUSE_ZLIB=OFF -DUSE_EXR=OFF -DUSE_PNG=OFF -DOPENVDB_USE_DELAYED_LOADING=OFF' }
           - { name: 'half',  build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DUSE_BLOSC=OFF -DUSE_IMATH_HALF=ON' }
           - { name: 'sse',   build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DOPENVDB_SIMD=SSE42' }
           - { name: 'avx',   build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DOPENVDB_SIMD=AVX' }
           - { name: 'numpy', build: 'Release', components: 'core,python,bin,view,render,test', cmake: '-DUSE_NUMPY=ON -DOPENVDB_PYTHON_WRAP_ALL_GRID_TYPES=ON' }
           - { name: 'asan',  build: 'asan',    components: 'core,test,axcore,axtest',          cmake: '-DNANOVDB_USE_OPENVDB=ON -DOPENVDB_AX_STATIC=OFF -DOPENVDB_CORE_STATIC=OFF -DUSE_BLOSC=OFF' } # We never called blosc_destroy(), so disable blosc to silence these errors
           - { name: 'ubsan', build: 'ubsan',   components: 'core,test,axcore,axtest',          cmake: '' }
+          - { name: 'c++20', build: 'Release', components: 'core,test,axcore,axtest',          cmake: '-DCMAKE_CXX_STANDARD=20' }
       fail-fast: false
     steps:
     - uses: actions/checkout@v3
@@ -233,7 +234,8 @@ jobs:
       matrix:
         config:
           - { cxx: 'clang++', build: 'Release', llvm: '14', dir: '@14' }
-          - { cxx: 'clang++', build: 'Release', llvm: 'latest', dir: '' }
+          # Can't support LLVM >= 15
+          #- { cxx: 'clang++', build: 'Release', llvm: 'latest', dir: '' }
       fail-fast: false
     steps:
       - uses: actions/checkout@v2
@@ -385,21 +387,21 @@ jobs:
         cd abi-compliance-checker && git checkout 7c175c45a8ba9ac41b8e47d8ebbab557b623b18e && cd -
     - name: build_latest
       run: >
-        CXXFLAGS=-Og ./ci/build.sh -v
+        sudo ./ci/build.sh -v
         --build-dir=build_latest
         --build-type=Debug
         --target=openvdb_shared
         --components=\"core\"
-        --cargs=\'-DUSE_EXPLICIT_INSTANTIATION=OFF\'
+        --cargs=\'-DUSE_EXPLICIT_INSTANTIATION=OFF -DDISABLE_DEPENDENCY_VERSION_CHECKS=ON\'
     - name: checkout_baseline
       run: git checkout v${VDB_MAJOR_VERSION}.0.0
     - name: build_baseline
       run: >
-        CXXFLAGS=-Og ./ci/build.sh -v
+        sudo ./ci/build.sh -v
         --build-type=Debug
         --target=openvdb_shared
         --components=\"core\"
-        --cargs=\'-DUSE_EXPLICIT_INSTANTIATION=OFF\'
+        --cargs=\'-DUSE_EXPLICIT_INSTANTIATION=OFF -DDISABLE_DEPENDENCY_VERSION_CHECKS=ON\'
     - name: abi_dump
       run: |
         abi-dumper/abi-dumper.pl build_latest/openvdb/openvdb/libopenvdb.so -o ABI-1.dump -lver 1
