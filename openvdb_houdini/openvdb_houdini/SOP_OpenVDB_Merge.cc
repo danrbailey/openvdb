@@ -331,36 +331,38 @@ struct MergeOp
     typename GridT::Ptr resampleToMatch(const GridT& src, const GridT& ref, int order)
     {
         using ValueT = typename GridT::ValueType;
-        const ValueT ZERO = openvdb::zeroVal<ValueT>();
 
         const openvdb::math::Transform& refXform = ref.constTransform();
 
         typename GridT::Ptr dest;
         if (src.getGridClass() == openvdb::GRID_LEVEL_SET) {
-            // For level set grids, use the level set rebuild tool to both resample the
-            // source grid to match the reference grid and to rebuild the resulting level set.
-            const bool refIsLevelSet = ref.getGridClass() == openvdb::GRID_LEVEL_SET;
-            OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
-            const ValueT halfWidth = refIsLevelSet
-                ? ValueT(ZERO + ref.background() * (1.0 / ref.voxelSize()[0]))
-                : ValueT(src.background() * (1.0 / src.voxelSize()[0]));
-            OPENVDB_NO_TYPE_CONVERSION_WARNING_END
+            if constexpr(std::is_floating_point<ValueT>::value) {
+                // For level set grids, use the level set rebuild tool to both resample the
+                // source grid to match the reference grid and to rebuild the resulting level set.
+                const ValueT ZERO = openvdb::zeroVal<ValueT>();
+                const bool refIsLevelSet = ref.getGridClass() == openvdb::GRID_LEVEL_SET;
+                OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
+                const ValueT halfWidth = refIsLevelSet
+                    ? ValueT(ZERO + ref.background() * (1.0 / ref.voxelSize()[0]))
+                    : ValueT(src.background() * (1.0 / src.voxelSize()[0]));
+                OPENVDB_NO_TYPE_CONVERSION_WARNING_END
 
-            if (!openvdb::math::isFinite(halfWidth)) {
-                std::stringstream msg;
-                msg << "Resample to match: Illegal narrow band width = " << halfWidth
-                    << ", caused by grid '" << src.getName() << "' with background "
-                    << ref.background();
-                throw std::invalid_argument(msg.str());
-            }
+                if (!openvdb::math::isFinite(halfWidth)) {
+                    std::stringstream msg;
+                    msg << "Resample to match: Illegal narrow band width = " << halfWidth
+                        << ", caused by grid '" << src.getName() << "' with background "
+                        << ref.background();
+                    throw std::invalid_argument(msg.str());
+                }
 
-            try {
-                dest = openvdb::tools::doLevelSetRebuild(src, /*iso=*/ZERO,
-                    /*exWidth=*/halfWidth, /*inWidth=*/halfWidth, &refXform, &interrupt);
-            } catch (openvdb::TypeError&) {
-                self->addWarning(SOP_MESSAGE, ("skipped rebuild of level set grid "
-                    + src.getName() + " of type " + src.type()).c_str());
-                dest.reset();
+                try {
+                    dest = openvdb::tools::doLevelSetRebuild(src, /*iso=*/ZERO,
+                        /*exWidth=*/halfWidth, /*inWidth=*/halfWidth, &refXform, &interrupt);
+                } catch (openvdb::TypeError&) {
+                    self->addWarning(SOP_MESSAGE, ("skipped rebuild of level set grid "
+                        + src.getName() + " of type " + src.type()).c_str());
+                    dest.reset();
+                }
             }
         }
         if (!dest && src.constTransform() != refXform) {
