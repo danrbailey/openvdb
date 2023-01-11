@@ -1,7 +1,7 @@
 // Copyright Contributors to the OpenVDB Project
 // SPDX-License-Identifier: MPL-2.0
 //
-/// @author Nick Avramoussis
+/// @author Nick Avramoussis, Richard Jones
 ///
 /// @file SOP_OpenVDB_Points_Surfacer.cpp
 ///
@@ -31,11 +31,11 @@ using SupportedGridT =
     openvdb::TypeList<bool, int32_t, int64_t, float, double,
         openvdb::Vec3f, openvdb::Vec3d, openvdb::Vec3i>;
 
-class SOP_VDBPointsSurfacer: public openvdb_houdini::SOP_NodeVDB
+class SOP_OpenVDB_Particle_Surfacer: public openvdb_houdini::SOP_NodeVDB
 {
 public:
-    SOP_VDBPointsSurfacer(OP_Network*, const char* name, OP_Operator*);
-    virtual ~SOP_VDBPointsSurfacer() {}
+    SOP_OpenVDB_Particle_Surfacer(OP_Network*, const char* name, OP_Operator*);
+    virtual ~SOP_OpenVDB_Particle_Surfacer() {}
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 protected:
     virtual OP_ERROR cookVDBSop(OP_Context&);
@@ -51,7 +51,7 @@ namespace
 enum SurfaceType
 {
     Spheres,
-    AveragePositions
+    ParticleFluid
 };
 
 }
@@ -69,28 +69,24 @@ newSopOperator(OP_OperatorTable* table)
 
     parms.add(hutil::ParmFactory(PRM_STRING, "group", "Group")
         .setChoiceList(&hutil::PrimGroupMenu)
-        .setTooltip("Specify a subset of the input point VDBs to surface.")
+        .setTooltip("Specify a subset of the input points/VDB Points grids to surface.")
         .setDocumentation(
-            "A subset of the input VDB Points primitives to be processed"));
-
-    // SURFACE PARMS
-    parms.add(hutil::ParmFactory(PRM_STRING, "surfacevdbname", "Output Surface VDB")
-        .setDefault("surface")
-        .setTooltip("The name of the surface VDB to be created."));
-
-    parms.add(hutil::ParmFactory(PRM_STRING, "referencegroup", "Reference VDB")
-        .setChoiceList(&hutil::PrimGroupMenuInput2)
-        .setTooltip(
-            "Give the output VDB the same orientation and voxel size as the selected VDB."));
+            "A subset of the input points to be processed - points or VDB Points grids"));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "vdbpointsgroups", "VDB Points Groups")
         .setChoiceList(&hvdb::VDBPointsGroupMenuInput1)
         .setDefault("")
         .setHelpText("Specify VDB Points Groups to use. (Default is all groups)"));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "keep", "Keep VDB Points")
-        .setDefault(PRMzeroDefaults)
-        .setTooltip("If enabled, VDB point grids will not be removed from the geometry stream."));
+    parms.add(hutil::ParmFactory(PRM_STRING, "referencegroup", "Reference VDB")
+        .setChoiceList(&hutil::PrimGroupMenuInput2)
+        .setTooltip(
+            "Give the output VDB the same orientation and voxel size as the selected VDB."));
+
+    // SURFACE PARMS
+    parms.add(hutil::ParmFactory(PRM_STRING, "surfacevdbname", "Output Surface VDB")
+        .setDefault("surface")
+        .setTooltip("The name of the surface VDB to be created."));
 
     parms.add(hutil::ParmFactory(PRM_FLT_J, "voxelsize", "Voxel Size")
         .setDefault(PRMpointOneDefaults)
@@ -110,12 +106,12 @@ newSopOperator(OP_OperatorTable* table)
 
     parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sepOutput", ""));
 
-    parms.add(hutil::ParmFactory(PRM_STRING, "radiusattribute", "Particle Radius Attribute")
+    parms.add(hutil::ParmFactory(PRM_STRING, "radiusattribute", "Radius Attribute")
         .setDefault("pscale")
         .setTooltip("The point attribute representing the particle radius,"
                     " if the attribute does not exist, a uniform value of 1 is assumed."));
 
-    parms.add(hutil::ParmFactory(PRM_FLT_J, "particleradius", "Particle Radius Scale")
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "particleradius", "Radius Scale")
         .setDefault(PRMoneDefaults)
         .setRange(PRM_RANGE_RESTRICTED, 0.0, PRM_RANGE_UI, 2.0)
         .setTooltip("A multiplier on the radius of the particles to be surfaced,"
@@ -126,13 +122,13 @@ newSopOperator(OP_OperatorTable* table)
     parms.add(hutil::ParmFactory(PRM_ORD, "mode", "Mode")
         .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
               "spherical",          "Spherical",
-              "averagepositions",   "Average Positions"
+              "particlefluid",   "Particle Fluid"
             })
         .setDefault(PRMoneDefaults)
         .setDocumentation("The method used to create a surface from the points.\n\n"
                     "*Spherical* - stamps spheres into a signed distance field."
                     " This is very fast and gives a good approximation of the surface suitable for simulation or for use with further post-processing.\n\n"
-                    "*Average Positions* - uses a weighted-average method to create smooth surfaces from the points."
+                    "*Particle Fluid* - uses a weighted-average method to create smooth surfaces from the points."
                     " This is good for slow moving and viscous fluids as it gives fast smooth results but can smooth out droplets and fine-details."));
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "useworldspaceinfluence", "Use World Space Influence Radius")
@@ -154,54 +150,51 @@ newSopOperator(OP_OperatorTable* table)
                     "Suggested values are of around 2-4x the average particle radius."
                     "Values much larger than this can be very inefficient and give undesirable results."));
 
-    parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sepInfluence", ""));
+    // parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sepInfluence", ""));
 
-    // transfer attributes
+    // // transfer attributes
 
-    parms.add(hutil::ParmFactory(PRM_HEADING, "transferheading", "Attribute Transfer"));
+    // parms.add(hutil::ParmFactory(PRM_HEADING, "transferheading", "Attribute Transfer"));
 
-    hutil::ParmList attrParms;
-    attrParms.add(hutil::ParmFactory(PRM_STRING, "name#", "Name")
-        .setHelpText("Attribute name"));
+    // hutil::ParmList attrParms;
+    // attrParms.add(hutil::ParmFactory(PRM_STRING, "name#", "Name")
+    //     .setHelpText("Attribute name"));
 
-    parms.add(hutil::ParmFactory(PRM_MULTITYPE_LIST, "numattr", "Number of Attributes")
-        .setHelpText("The number of attributes to transfer.")
-        .setMultiparms(attrParms)
-        .setDefault(PRMzeroDefaults));
+    // parms.add(hutil::ParmFactory(PRM_MULTITYPE_LIST, "numattr", "Number of Attributes")
+    //     .setHelpText("The number of attributes to transfer.")
+    //     .setMultiparms(attrParms)
+    //     .setDefault(PRMzeroDefaults));
 
-    hvdb::OpenVDBOpFactory("VDB Points Surfacer",
-        SOP_VDBPointsSurfacer::factory, parms, *table)
-        .addInput("VDB Points to surface")
+    hvdb::OpenVDBOpFactory("VDB Particle Surfacer",
+        SOP_OpenVDB_Particle_Surfacer::factory, parms, *table)
+        .addInput("Points to surface")
         .addOptionalInput("Optional VDB grid that defines the output transform. "
             "The half-band width is matched if the input grid is a level set.")
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\
 \n\
-\"\"\"Converts a points VDB to a levelset surface.\"\"\"\n\
+\"\"\"Converts points and points VDBs to a levelset surface.\"\"\"\n\
 \n\
 @overview\n\
 \n\
-This node converts a points VDB to a levelset surface. It has a collection of modes\n\
-to allow various methods of performing this conversion. Points can stamp a simple spherical\n\
-footprint or use some more advanced methods to average (and smooth) their footprint.\n\
-\n\
-:tip:\n\
-Convert points to a points VDB using a [OpenVDB Points Convert|Node:sop/DW_OpenVDBPointsConvert] node.\n\
+This node converts particles (points or VDB Points grids) to a levelset surface. Its modes\n\
+to allow different methods of performing this conversion. Points can stamp a simple spherical\n\
+footprint or use some more advanced methods to average (and smooth) their footprint, creating a particle fluid.\n\
 ");
 }
 
 
 bool
-SOP_VDBPointsSurfacer::updateParmsFlags()
+SOP_OpenVDB_Particle_Surfacer::updateParmsFlags()
 {
     bool changed = false;
     const fpreal t = CHgetEvalTime();
     const SurfaceType mode = static_cast<SurfaceType>(evalInt("mode", 0, t));
 
-    const bool averagePositions = mode == SurfaceType::AveragePositions;
+    const bool particleFluid = mode == SurfaceType::ParticleFluid;
     const bool hasRefInput = this->nInputs() == 2;
-    const bool requiresInfluence = averagePositions;
+    const bool requiresInfluence = particleFluid;
     const bool absoluteInfluence = static_cast<bool>(evalInt("useworldspaceinfluence", 0, t));
 
     changed |= enableParm("voxelsize", !hasRefInput);
@@ -219,14 +212,14 @@ SOP_VDBPointsSurfacer::updateParmsFlags()
 
 
 OP_Node*
-SOP_VDBPointsSurfacer::factory(OP_Network* net,
+SOP_OpenVDB_Particle_Surfacer::factory(OP_Network* net,
     const char* name, OP_Operator* op)
 {
-    return new SOP_VDBPointsSurfacer(net, name, op);
+    return new SOP_OpenVDB_Particle_Surfacer(net, name, op);
 }
 
 
-SOP_VDBPointsSurfacer::SOP_VDBPointsSurfacer(OP_Network* net,
+SOP_OpenVDB_Particle_Surfacer::SOP_OpenVDB_Particle_Surfacer(OP_Network* net,
     const char* name, OP_Operator* op)
     : hvdb::SOP_NodeVDB(net, name, op)
 {}
@@ -284,20 +277,24 @@ inline openvdb::GridPtrVec rasterZbP(const Args&... args)
 }
 
 OP_ERROR
-SOP_VDBPointsSurfacer::cookVDBSop(OP_Context& context)
+SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
 {
     using namespace openvdb;
     using namespace openvdb::points;
 
     try {
-        hutil::ScopedInputLock lock(*this, context);
-        OPENVDB_NO_DEPRECATION_WARNING_BEGIN
-        if (duplicateSourceStealable(0, context) >= UT_ERROR_ABORT) return error();
-        OPENVDB_NO_DEPRECATION_WARNING_END
+        OP_AutoLockInputs inputs(this);
+        if (inputs.lock(context) >= UT_ERROR_ABORT)
+            return error();
+        gdp->clearAndDestroy();
 
-        hvdb::Interrupter boss("VDB Point Surfacer");
+        hvdb::Interrupter boss("VDB Particle Surfacer");
 
         const fpreal time = context.getTime();
+
+        const GU_Detail* pointGeo = inputGeo(0, context);
+        const std::string groupStr = evalStdString("group", time);
+        const GA_PrimitiveGroup* group = matchGroup(*pointGeo, evalStdString("group", time));
 
         math::Transform::Ptr sdfTransform;
         const GU_Detail* refGeo = inputGeo(1);
@@ -323,9 +320,6 @@ SOP_VDBPointsSurfacer::cookVDBSop(OP_Context& context)
 
         const std::string surfaceName = evalStdString("surfacevdbname", time);
         const Real halfBand = Real(evalInt("halfbandvoxels", 0, time));
-        const bool keepPoints = evalInt("keep", 0, time) == 1;
-        const std::string groupStr = evalStdString("group", time);
-        const GA_PrimitiveGroup *group = matchGroup(*gdp, groupStr);
         const SurfaceType mode = static_cast<SurfaceType>(evalInt("mode", 0, time));
         const bool absoluteInfluence = static_cast<bool>(evalInt("useworldspaceinfluence", 0, time));
         const Real influenceRadius = Real(evalFloat("influenceradius", 0, time));
@@ -334,26 +328,52 @@ SOP_VDBPointsSurfacer::cookVDBSop(OP_Context& context)
         const Real radiusScale = Real(evalFloat("particleradius", 0, time));
         const bool rebuildLevelSet = static_cast<bool>(evalInt("rebuildlevelset", 0, time));
 
-        // check to see if we have a point data grid
-        bool hasPoints = false;
-        // prims to remove if keepPoints is false
-        UT_Array<GEO_Primitive*> primsToDelete;
+        std::vector<openvdb::points::PointDataGrid::ConstPtr> pointGrids;
 
-        openvdb_houdini::VdbPrimIterator vdbIt(gdp, group);
+        std::vector<GA_Offset> vdbPrimOffsets;
+        for (hvdb::VdbPrimCIterator vdbIt(pointGeo, group); vdbIt; ++vdbIt) {
+            const GU_PrimVDB* vdbPrim = *vdbIt;
+
+            // mark point offset as a point referencing a VDB
+            vdbPrimOffsets.emplace_back(vdbPrim->getPointOffset(0));
+        }
+
+        for (hvdb::VdbPrimCIterator vdbIt(pointGeo, group); vdbIt; ++vdbIt) {
+
+            const GU_PrimVDB* vdbPrim = *vdbIt;
+
+            // only process if grid is a PointDataGrid
+            auto gridPtr = openvdb::gridConstPtrCast<openvdb::points::PointDataGrid>(vdbPrim->getConstGridPtr());
+            if(!gridPtr) continue;
+            pointGrids.emplace_back(gridPtr);
+        }
+
+        // Convert all Houdini points that don't reference a VDB into a new VDB
+
+        if (pointGeo->getNumPoints() > vdbPrimOffsets.size()) {
+            // compute auto voxel-size based on point distribution
+            openvdb::math::Mat4d matrix(openvdb::math::Mat4d::identity());
+            const float voxelSize = hvdb::computeVoxelSizeFromHoudini(*pointGeo, /*pointsPerVoxel=*/8,
+                matrix, /*rounding=*/5, boss);
+            matrix.preScale(openvdb::Vec3d(voxelSize) / openvdb::math::getScale(matrix));
+            auto pointsTransform = openvdb::math::Transform::createLinearTransform(matrix);
+
+            // convert Houdini points to VDB Points
+            openvdb_houdini::AttributeInfoMap attributes;
+            if (!radiusAttributeName.empty()) {
+                attributes[radiusAttributeName] = {0, false};
+            }
+
+            openvdb::points::PointDataGrid::Ptr houdiniPointsAsGridNonConst = hvdb::convertHoudiniToPointDataGrid(
+                *pointGeo, /*compression=*/1, attributes, *pointsTransform);
+            openvdb::points::PointDataGrid::ConstPtr houdiniPointsAsGrid = openvdb::ConstPtrCast<
+                const openvdb::points::PointDataGrid>(houdiniPointsAsGridNonConst);
+            pointGrids.emplace_back(houdiniPointsAsGrid);
+        }
+
 
         // surface all point data grids
-        for (; vdbIt; ++vdbIt) {
-
-            GU_PrimVDB* vdbPrim = *vdbIt;
-
-            // only process if grid is a PointDataGrid with leaves
-            if (!gridConstPtrCast<PointDataGrid>(vdbPrim->getConstGridPtr())) continue;
-            if (!keepPoints) primsToDelete.append(*vdbIt);
-            hasPoints = true;
-
-            vdbPrim->makeGridUnique();
-
-            PointDataGrid::Ptr points = gridPtrCast<PointDataGrid>(vdbPrim->getGridPtr());
+        for (const auto& points : pointGrids) {
             const auto iter = points->constTree().cbeginLeaf();
 
             if (!iter) continue;
@@ -373,7 +393,7 @@ SOP_VDBPointsSurfacer::cookVDBSop(OP_Context& context)
 
             // determine attributes to transfer
 
-            const int numAttrs = int(evalInt("numattr", 0, time));
+            const int numAttrs = 0;//int(evalInt("numattr", 0, time));
             std::vector<std::string> transferAttributes;
             transferAttributes.reserve(numAttrs);
 
@@ -414,7 +434,7 @@ SOP_VDBPointsSurfacer::cookVDBSop(OP_Context& context)
                     else           grids = raster<MultiGroupFilter>(*points, radiusScale, transferAttributes, halfBand, sdfTransform, filter, &boss);
                 }
             }
-            else { //mode == SurfaceType::AveragePositions
+            else { //mode == SurfaceType::ParticleFluid
 
                 double scale;
                 if (absoluteInfluence) {
@@ -466,17 +486,6 @@ SOP_VDBPointsSurfacer::cookVDBSop(OP_Context& context)
                 hvdb::createVdbPrimitive(*gdp, grid);
             }
         }
-
-        // if no point data grids found throw warning
-        if (!hasPoints) {
-            addWarning(SOP_MESSAGE, "No VDB Points primitives found.");
-            return error();
-        }
-
-        if (!primsToDelete.isEmpty()) {
-            gdp->deletePrimitives(primsToDelete, true);
-        }
-
     } catch (std::exception& e) {
         addError(SOP_MESSAGE, e.what());
     }
