@@ -150,21 +150,6 @@ newSopOperator(OP_OperatorTable* table)
                     "Suggested values are of around 2-4x the average particle radius."
                     "Values much larger than this can be very inefficient and give undesirable results."));
 
-    // parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sepInfluence", ""));
-
-    // // transfer attributes
-
-    // parms.add(hutil::ParmFactory(PRM_HEADING, "transferheading", "Attribute Transfer"));
-
-    // hutil::ParmList attrParms;
-    // attrParms.add(hutil::ParmFactory(PRM_STRING, "name#", "Name")
-    //     .setHelpText("Attribute name"));
-
-    // parms.add(hutil::ParmFactory(PRM_MULTITYPE_LIST, "numattr", "Number of Attributes")
-    //     .setHelpText("The number of attributes to transfer.")
-    //     .setMultiparms(attrParms)
-    //     .setDefault(PRMzeroDefaults));
-
     hvdb::OpenVDBOpFactory("VDB Particle Surfacer",
         SOP_OpenVDB_Particle_Surfacer::factory, parms, *table)
         .addInput("Points to surface")
@@ -227,11 +212,10 @@ SOP_OpenVDB_Particle_Surfacer::SOP_OpenVDB_Particle_Surfacer(OP_Network* net,
 ////////////////////////////////////////
 
 template <typename FilterT, typename ...Args>
-inline openvdb::GridPtrVec raster(const Args&... args)
+inline openvdb::FloatGrid::Ptr raster(const Args&... args)
 {
     return openvdb::points::rasterizeSpheres<
                 openvdb::points::PointDataGrid,
-                SupportedGridT,
                 openvdb::FloatGrid,
                 FilterT,
                 hvdb::Interrupter>
@@ -239,11 +223,10 @@ inline openvdb::GridPtrVec raster(const Args&... args)
 }
 
 template <typename FilterT, typename ...Args>
-inline openvdb::GridPtrVec rasterP(const Args&... args)
+inline openvdb::FloatGrid::Ptr rasterP(const Args&... args)
 {
     return openvdb::points::rasterizeSpheres<
                 openvdb::points::PointDataGrid,
-                SupportedGridT,
                 float,
                 openvdb::FloatGrid,
                 FilterT,
@@ -252,11 +235,10 @@ inline openvdb::GridPtrVec rasterP(const Args&... args)
 }
 
 template <typename FilterT, typename ...Args>
-inline openvdb::GridPtrVec rasterZb(const Args&... args)
+inline openvdb::FloatGrid::Ptr rasterZb(const Args&... args)
 {
     return openvdb::points::rasterizeSmoothSpheres<
                 openvdb::points::PointDataGrid,
-                SupportedGridT,
                 openvdb::FloatGrid,
                 FilterT,
                 hvdb::Interrupter>
@@ -264,11 +246,10 @@ inline openvdb::GridPtrVec rasterZb(const Args&... args)
 }
 
 template <typename FilterT, typename ...Args>
-inline openvdb::GridPtrVec rasterZbP(const Args&... args)
+inline openvdb::FloatGrid::Ptr rasterZbP(const Args&... args)
 {
     return openvdb::points::rasterizeSmoothSpheres<
                 openvdb::points::PointDataGrid,
-                SupportedGridT,
                 float,
                 openvdb::FloatGrid,
                 FilterT,
@@ -393,45 +374,23 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
 
             // determine attributes to transfer
 
-            const int numAttrs = 0;//int(evalInt("numattr", 0, time));
-            std::vector<std::string> transferAttributes;
-            transferAttributes.reserve(numAttrs);
-
-            for(int i = 1; i < numAttrs + 1; i++) {
-                UT_String attrName;
-                evalStringInst("name#", &i, attrName, 0, time);
-                const std::string attrNameStr = attrName.toStdString();
-
-                // warn if attribute is missing
-
-                if ((!attrNameStr.empty()) && descriptor.find(attrNameStr) !=
-                    points::AttributeSet::INVALID_POS) {
-                    transferAttributes.emplace_back(attrNameStr);
-                }
-                else {
-                    std::string warning = "Attribute " + attrNameStr +
-                        " not available for transfer to volume";
-                    addWarning(SOP_MESSAGE, warning.c_str());
-                }
-            }
-
-            GridPtrVec grids;
+            openvdb::FloatGrid::Ptr output;
 
             if (mode == SurfaceType::Spheres) {
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    if (hasPscale) grids = rasterP<NullFilter>(*points, radiusAttributeName, transferAttributes, radiusScale, halfBand, sdfTransform, filter, &boss);
-                    else           grids = raster<NullFilter>(*points, radiusScale, transferAttributes, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterP<NullFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    else           output = raster<NullFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    if (hasPscale) grids = rasterP<GroupFilter>(*points, radiusAttributeName, transferAttributes, radiusScale, halfBand, sdfTransform, filter, &boss);
-                    else           grids = raster<GroupFilter>(*points, radiusScale, transferAttributes, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterP<GroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    else           output = raster<GroupFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    if (hasPscale) grids = rasterP<MultiGroupFilter>(*points, radiusAttributeName, transferAttributes, radiusScale, halfBand, sdfTransform, filter, &boss);
-                    else           grids = raster<MultiGroupFilter>(*points, radiusScale, transferAttributes, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterP<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    else           output = raster<MultiGroupFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
             }
             else { //mode == SurfaceType::ParticleFluid
@@ -450,40 +409,28 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
 
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    if (hasPscale) grids = rasterZbP<NullFilter>(*points, radiusAttributeName, radiusScale, scale, transferAttributes, halfBand, sdfTransform, filter, &boss);
-                    else           grids = rasterZb<NullFilter>(*points, radiusScale, scale, transferAttributes, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterZbP<NullFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterZb<NullFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    if (hasPscale) grids = rasterZbP<GroupFilter>(*points, radiusAttributeName, radiusScale, scale, transferAttributes, halfBand, sdfTransform, filter, &boss);
-                    else           grids = rasterZb<GroupFilter>(*points, radiusScale, scale, transferAttributes, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterZbP<GroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterZb<GroupFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    if (hasPscale) grids = rasterZbP<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, scale, transferAttributes, halfBand, sdfTransform, filter, &boss);
-                    else           grids = rasterZb<MultiGroupFilter>(*points, radiusScale, scale, transferAttributes, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterZbP<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterZb<MultiGroupFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
             }
 
-            FloatGrid::Ptr outputGrid;
-            if (!grids.empty()) {
-                outputGrid = StaticPtrCast<FloatGrid>(grids.front());
-                std::rotate(grids.begin(), grids.begin()+1, grids.end());
-                grids.pop_back();
-            }
-
-            if (outputGrid) {
+            if (output) {
                 if (rebuildLevelSet) {
-                    outputGrid =
-                        tools::levelSetRebuild(*outputGrid, 0, float(halfBand), float(halfBand));
+                    output =
+                        tools::levelSetRebuild(*output, 0, float(halfBand), float(halfBand));
                 }
-                outputGrid->setName(surfaceName);
-                hvdb::createVdbPrimitive(*gdp, outputGrid);
-            }
-
-            for (const auto& grid : grids) {
-                if (!grid) continue;
-                hvdb::createVdbPrimitive(*gdp, grid);
+                output->setName(surfaceName);
+                hvdb::createVdbPrimitive(*gdp, output);
             }
         }
     } catch (std::exception& e) {
