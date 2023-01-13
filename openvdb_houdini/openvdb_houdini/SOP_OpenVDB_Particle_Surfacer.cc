@@ -3,9 +3,9 @@
 //
 /// @author Nick Avramoussis, Richard Jones
 ///
-/// @file SOP_OpenVDB_Points_Surfacer.cpp
+/// @file SOP_OpenVDB_Particle_Surfacer.cpp
 ///
-/// @brief Surface VDB Points into a VDB Level Set using a variety of methods
+/// @brief Surface points into a VDB Level Set using a variety of methods
 
 #include <houdini_utils/ParmFactory.h>
 #include <openvdb_houdini/Utils.h>
@@ -36,11 +36,12 @@ class SOP_OpenVDB_Particle_Surfacer: public openvdb_houdini::SOP_NodeVDB
 {
 public:
     SOP_OpenVDB_Particle_Surfacer(OP_Network*, const char* name, OP_Operator*);
-    virtual ~SOP_OpenVDB_Particle_Surfacer() {}
+    ~SOP_OpenVDB_Particle_Surfacer() override {}
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
+    class Cache: public SOP_VDBCacheOptions { OP_ERROR cookVDBSop(OP_Context&) override; };
+
 protected:
-    virtual OP_ERROR cookVDBSop(OP_Context&);
-    virtual bool updateParmsFlags();
+    bool updateParmsFlags() override;
 };
 
 
@@ -161,8 +162,8 @@ newSopOperator(OP_OperatorTable* table)
         .addInput("Points to surface")
         .addOptionalInput("Optional VDB grid that defines the output transform. "
             "The half-band width is matched if the input grid is a level set.")
-        // .setVerb(SOP_NodeVerb::COOK_GENERATOR,
-        //     []() { return new SOP_OpenVDB_From_Particles::Cache; })
+        .setVerb(SOP_NodeVerb::COOK_GENERATOR,
+            []() { return new SOP_OpenVDB_Particle_Surfacer::Cache; })
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\
@@ -173,7 +174,8 @@ newSopOperator(OP_OperatorTable* table)
 \n\
 This node converts particles (points or VDB Points grids) to a levelset surface. Its modes\n\
 to allow different methods of performing this conversion. Points can stamp a simple spherical\n\
-footprint or use some more advanced methods to average (and smooth) their footprint, creating a particle fluid.\n\
+footprint or use some more advanced methods to average (and smooth) their footprint, creating a\n\
+fluid-like surface.\n\
 ");
 }
 
@@ -266,28 +268,23 @@ inline openvdb::FloatGrid::Ptr rasterZbP(const Args&... args)
 }
 
 OP_ERROR
-SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
+SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
 {
     using namespace openvdb;
     using namespace openvdb::points;
 
     try {
-        OP_AutoLockInputs inputs(this);
-
-        if (inputs.lock(context) >= UT_ERROR_ABORT)
-            return error();
-        gdp->clearAndDestroy();
-
         hvdb::HoudiniInterrupter boss("VDB Particle Surfacer");
 
         const fpreal time = context.getTime();
 
-        const GU_Detail* pointGeo = inputGeo(0, context);
+        const GU_Detail* pointGeo = inputGeo(0);
+        const GU_Detail* refGeo = inputGeo(1);
+
         const std::string groupStr = evalStdString("group", time);
         const GA_PrimitiveGroup* group = matchGroup(*pointGeo, evalStdString("group", time));
 
         math::Transform::Ptr sdfTransform;
-        const GU_Detail* refGeo = inputGeo(1);
         if (refGeo) {
             // Get the first grid in the group's transform
             const GA_PrimitiveGroup *refGroup = matchGroup(*refGeo, evalStdString("referencegroup", time));
@@ -442,8 +439,10 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
                 else hvdb::createVdbPrimitive(*gdp, output);
             }
         }
-        if (mergeoutput) {
+        if (mergeoutput && !gridsToMerge.empty()) {
+            assert(gridsToMerge.front());
             output = openvdb::FloatGrid::create(*gridsToMerge.front());
+            output->setName(surfaceName);
             openvdb::tree::DynamicNodeManager<openvdb::FloatTree> nodeManager(output->tree());
             std::vector<openvdb::tools::TreeToMerge<openvdb::FloatTree>> treesToMerge;
             for (const auto& grid : gridsToMerge) treesToMerge.emplace_back(grid->tree(), openvdb::Steal());
