@@ -19,6 +19,7 @@
 #include <openvdb/points/PointStatistics.h>
 #include <openvdb/points/PointRasterizeSDF.h>
 #include <openvdb/tools/LevelSetRebuild.h>
+#include <openvdb/tools/Merge.h>
 #include <openvdb/util/NullInterrupter.h>
 
 #include <CH/CH_Manager.h>
@@ -104,6 +105,11 @@ newSopOperator(OP_OperatorTable* table)
         .setDefault(PRMoneDefaults)
         .setTooltip("Rebuild the level set after running the surfacing algorithm"));
 
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "mergeoutput", "Merge Output VDBs")
+        .setDefault(PRMoneDefaults)
+        .setTooltip("If enabled, all surfaces from different points VDBs or from Houdini points "
+                    "are merged into a single VDB, otherwise will output as separate VDBs"));
+
     parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sepOutput", ""));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "radiusattribute", "Radius Attribute")
@@ -155,6 +161,8 @@ newSopOperator(OP_OperatorTable* table)
         .addInput("Points to surface")
         .addOptionalInput("Optional VDB grid that defines the output transform. "
             "The half-band width is matched if the input grid is a level set.")
+        // .setVerb(SOP_NodeVerb::COOK_GENERATOR,
+        //     []() { return new SOP_OpenVDB_From_Particles::Cache; })
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\
@@ -218,7 +226,7 @@ inline openvdb::FloatGrid::Ptr raster(const Args&... args)
                 openvdb::points::PointDataGrid,
                 openvdb::FloatGrid,
                 FilterT,
-                hvdb::Interrupter>
+                hvdb::HoudiniInterrupter>
                     (args...);
 }
 
@@ -230,7 +238,7 @@ inline openvdb::FloatGrid::Ptr rasterP(const Args&... args)
                 float,
                 openvdb::FloatGrid,
                 FilterT,
-                hvdb::Interrupter>
+                hvdb::HoudiniInterrupter>
                     (args...);
 }
 
@@ -241,7 +249,7 @@ inline openvdb::FloatGrid::Ptr rasterZb(const Args&... args)
                 openvdb::points::PointDataGrid,
                 openvdb::FloatGrid,
                 FilterT,
-                hvdb::Interrupter>
+                hvdb::HoudiniInterrupter>
                     (args...);
 }
 
@@ -253,7 +261,7 @@ inline openvdb::FloatGrid::Ptr rasterZbP(const Args&... args)
                 float,
                 openvdb::FloatGrid,
                 FilterT,
-                hvdb::Interrupter>
+                hvdb::HoudiniInterrupter>
                     (args...);
 }
 
@@ -265,11 +273,12 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
 
     try {
         OP_AutoLockInputs inputs(this);
+
         if (inputs.lock(context) >= UT_ERROR_ABORT)
             return error();
         gdp->clearAndDestroy();
 
-        hvdb::Interrupter boss("VDB Particle Surfacer");
+        hvdb::HoudiniInterrupter boss("VDB Particle Surfacer");
 
         const fpreal time = context.getTime();
 
@@ -308,9 +317,9 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
         const std::string radiusAttributeName = evalStdString("radiusattribute", time);
         const Real radiusScale = Real(evalFloat("particleradius", 0, time));
         const bool rebuildLevelSet = static_cast<bool>(evalInt("rebuildlevelset", 0, time));
+        const bool mergeoutput = static_cast<bool>(evalInt("mergeoutput", 0, time));
 
         std::vector<openvdb::points::PointDataGrid::ConstPtr> pointGrids;
-
         std::vector<GA_Offset> vdbPrimOffsets;
         for (hvdb::VdbPrimCIterator vdbIt(pointGeo, group); vdbIt; ++vdbIt) {
             const GU_PrimVDB* vdbPrim = *vdbIt;
@@ -352,6 +361,8 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
             pointGrids.emplace_back(houdiniPointsAsGrid);
         }
 
+        std::vector<openvdb::FloatGrid::Ptr> gridsToMerge;
+        openvdb::FloatGrid::Ptr output;
 
         // surface all point data grids
         for (const auto& points : pointGrids) {
@@ -373,8 +384,6 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
             points::AttributeSet::Descriptor::parseNames(include, exclude, groupStr);
 
             // determine attributes to transfer
-
-            openvdb::FloatGrid::Ptr output;
 
             if (mode == SurfaceType::Spheres) {
                 if (exclude.empty() && include.empty()) {
@@ -425,13 +434,25 @@ SOP_OpenVDB_Particle_Surfacer::cookVDBSop(OP_Context& context)
             }
 
             if (output) {
-                if (rebuildLevelSet) {
-                    output =
-                        tools::levelSetRebuild(*output, 0, float(halfBand), float(halfBand));
+                if (rebuildLevelSet && !mergeoutput) {
+                    output = tools::levelSetRebuild(*output, 0, float(halfBand), float(halfBand));
                 }
                 output->setName(surfaceName);
-                hvdb::createVdbPrimitive(*gdp, output);
+                if (mergeoutput) gridsToMerge.emplace_back(output);
+                else hvdb::createVdbPrimitive(*gdp, output);
             }
+        }
+        if (mergeoutput) {
+            output = openvdb::FloatGrid::create(*gridsToMerge.front());
+            openvdb::tree::DynamicNodeManager<openvdb::FloatTree> nodeManager(output->tree());
+            std::vector<openvdb::tools::TreeToMerge<openvdb::FloatTree>> treesToMerge;
+            for (const auto& grid : gridsToMerge) treesToMerge.emplace_back(grid->tree(), openvdb::Steal());
+            nodeManager.foreachTopDown(openvdb::tools::CsgUnionOp<openvdb::FloatTree>(treesToMerge));
+            if (rebuildLevelSet) {
+                output = tools::levelSetRebuild(*output, 0, float(halfBand), float(halfBand));
+            }
+            output->setName(surfaceName);
+            hvdb::createVdbPrimitive(*gdp, output);
         }
     } catch (std::exception& e) {
         addError(SOP_MESSAGE, e.what());
