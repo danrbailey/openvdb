@@ -136,6 +136,23 @@ newSopOperator(OP_OperatorTable* table)
             "Max:\n"
             "   Generate the max of all fog VDBs within the same collation.\n\n"));
 
+    parms.add(hutil::ParmFactory(PRM_STRING, "op_scalar", "Scalar VDBs")
+        .setDefault("add")
+        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
+            "none",             "None",
+            "add",              "Add",
+            "max",              "Max"
+        })
+        .setTooltip("Merge operation for Scalar VDBs.")
+        .setDocumentation(
+            "Merge operation for Scalar VDBs (int, float and double VDBs).\n\n"
+            "None:\n"
+            "   Leaves input scalar VDBs unchanged.\n\n"
+            "Add:\n"
+            "   Generate the sum of all scalar VDBs within the same collation.\n\n"
+            "Max:\n"
+            "   Generate the max of all scalar VDBs within the same collation.\n\n"));
+
     parms.add(hutil::ParmFactory(PRM_STRING, "op_sdf", "SDF VDBs")
         .setDefault("sdfunion")
         .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
@@ -319,6 +336,11 @@ struct MergeOp
         } else if (key.gridClass == openvdb::GRID_FOG_VOLUME) {
             if (key.valueType == UT_VDB_FLOAT || key.valueType == UT_VDB_DOUBLE) {
                 op = opRemap.at("op_fog");
+            }
+        } else {
+            if (key.valueType == UT_VDB_FLOAT || key.valueType == UT_VDB_DOUBLE ||
+                key.valueType == UT_VDB_INT32 || key.valueType == UT_VDB_INT64) {
+                op = opRemap.at("op_scalar");
             }
         }
 
@@ -646,6 +668,7 @@ SOP_OpenVDB_Merge::Cache::cookVDBSop(OP_Context& context)
         mergeOp.self = this;
         mergeOp.opRemap["op_sdf"] = evalStdString("op_sdf", mTime);
         mergeOp.opRemap["op_fog"] = evalStdString("op_fog", mTime);
+        mergeOp.opRemap["op_scalar"] = evalStdString("op_scalar", mTime);
 
         // extract non-const VDB primitives from first input
 
