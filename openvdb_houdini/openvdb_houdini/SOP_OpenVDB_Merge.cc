@@ -14,8 +14,8 @@
 #include <openvdb_houdini/GEO_PrimVDB.h>
 
 #include <openvdb/points/PointDataGrid.h> // points::PointDataGrid
-#include <openvdb/tools/GridTransformer.h> // tools::replaceToMatch()
-#include <openvdb/tools/LevelSetRebuild.h> // tools::doLevelSetRebuild()
+#include <openvdb/tools/GridTransformer.h> // tools::resampleToMatch()
+#include <openvdb/tools/LevelSetRebuild.h> // tools::levelSetRebuild()
 #include <openvdb/tools/Merge.h>
 
 #include <appstats/HoudiniAppStats.h> // for explicit timing of SumMergeOp
@@ -356,7 +356,7 @@ struct MergeOp
                 }
 
                 try {
-                    dest = openvdb::tools::doLevelSetRebuild(src, /*iso=*/ZERO,
+                    dest = openvdb::tools::levelSetRebuild(src, /*iso=*/ZERO,
                         /*exWidth=*/halfWidth, /*inWidth=*/halfWidth, &refXform, &interrupt);
                 } catch (openvdb::TypeError&) {
                     self->addWarning(SOP_MESSAGE, ("skipped rebuild of level set grid "
