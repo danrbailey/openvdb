@@ -133,6 +133,7 @@ else()
     TestMetadata.cc
     TestMetaMap.cc
     TestMetadataIO.cc
+    TestMotionBlur.cc
     TestMorphology.cc
     TestMultiResGrid.cc
     TestName.cc
