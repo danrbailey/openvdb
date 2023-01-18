@@ -14,8 +14,8 @@
 #include <openvdb_houdini/GEO_PrimVDB.h>
 
 #include <openvdb/points/PointDataGrid.h> // points::PointDataGrid
-#include <openvdb/tools/GridTransformer.h> // tools::replaceToMatch()
-#include <openvdb/tools/LevelSetRebuild.h> // tools::doLevelSetRebuild()
+#include <openvdb/tools/GridTransformer.h> // tools::resampleToMatch()
+#include <openvdb/tools/LevelSetRebuild.h> // tools::levelSetRebuild()
 #include <openvdb/tools/Merge.h>
 
 #include <appstats/HoudiniAppStats.h> // for explicit timing of SumMergeOp
@@ -135,6 +135,23 @@ newSopOperator(OP_OperatorTable* table)
             "   Generate the sum of all fog VDBs within the same collation.\n\n"
             "Max:\n"
             "   Generate the max of all fog VDBs within the same collation.\n\n"));
+
+    parms.add(hutil::ParmFactory(PRM_STRING, "op_scalar", "Scalar VDBs")
+        .setDefault("add")
+        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
+            "none",             "None",
+            "add",              "Add",
+            "max",              "Max"
+        })
+        .setTooltip("Merge operation for Scalar VDBs.")
+        .setDocumentation(
+            "Merge operation for Scalar VDBs (int, float and double VDBs).\n\n"
+            "None:\n"
+            "   Leaves input scalar VDBs unchanged.\n\n"
+            "Add:\n"
+            "   Generate the sum of all scalar VDBs within the same collation.\n\n"
+            "Max:\n"
+            "   Generate the max of all scalar VDBs within the same collation.\n\n"));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "op_sdf", "SDF VDBs")
         .setDefault("sdfunion")
@@ -320,6 +337,11 @@ struct MergeOp
             if (key.valueType == UT_VDB_FLOAT || key.valueType == UT_VDB_DOUBLE) {
                 op = opRemap.at("op_fog");
             }
+        } else {
+            if (key.valueType == UT_VDB_FLOAT || key.valueType == UT_VDB_DOUBLE ||
+                key.valueType == UT_VDB_INT32 || key.valueType == UT_VDB_INT64) {
+                op = opRemap.at("op_scalar");
+            }
         }
 
         if (op == "none")   op = "";
@@ -331,36 +353,38 @@ struct MergeOp
     typename GridT::Ptr resampleToMatch(const GridT& src, const GridT& ref, int order)
     {
         using ValueT = typename GridT::ValueType;
-        const ValueT ZERO = openvdb::zeroVal<ValueT>();
 
         const openvdb::math::Transform& refXform = ref.constTransform();
 
         typename GridT::Ptr dest;
         if (src.getGridClass() == openvdb::GRID_LEVEL_SET) {
-            // For level set grids, use the level set rebuild tool to both resample the
-            // source grid to match the reference grid and to rebuild the resulting level set.
-            const bool refIsLevelSet = ref.getGridClass() == openvdb::GRID_LEVEL_SET;
-            OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
-            const ValueT halfWidth = refIsLevelSet
-                ? ValueT(ZERO + ref.background() * (1.0 / ref.voxelSize()[0]))
-                : ValueT(src.background() * (1.0 / src.voxelSize()[0]));
-            OPENVDB_NO_TYPE_CONVERSION_WARNING_END
+            if constexpr(std::is_floating_point<ValueT>::value) {
+                // For level set grids, use the level set rebuild tool to both resample the
+                // source grid to match the reference grid and to rebuild the resulting level set.
+                const ValueT ZERO = openvdb::zeroVal<ValueT>();
+                const bool refIsLevelSet = ref.getGridClass() == openvdb::GRID_LEVEL_SET;
+                OPENVDB_NO_TYPE_CONVERSION_WARNING_BEGIN
+                const ValueT halfWidth = refIsLevelSet
+                    ? ValueT(ZERO + ref.background() * (1.0 / ref.voxelSize()[0]))
+                    : ValueT(src.background() * (1.0 / src.voxelSize()[0]));
+                OPENVDB_NO_TYPE_CONVERSION_WARNING_END
 
-            if (!openvdb::math::isFinite(halfWidth)) {
-                std::stringstream msg;
-                msg << "Resample to match: Illegal narrow band width = " << halfWidth
-                    << ", caused by grid '" << src.getName() << "' with background "
-                    << ref.background();
-                throw std::invalid_argument(msg.str());
-            }
+                if (!openvdb::math::isFinite(halfWidth)) {
+                    std::stringstream msg;
+                    msg << "Resample to match: Illegal narrow band width = " << halfWidth
+                        << ", caused by grid '" << src.getName() << "' with background "
+                        << ref.background();
+                    throw std::invalid_argument(msg.str());
+                }
 
-            try {
-                dest = openvdb::tools::doLevelSetRebuild(src, /*iso=*/ZERO,
-                    /*exWidth=*/halfWidth, /*inWidth=*/halfWidth, &refXform, &interrupt);
-            } catch (openvdb::TypeError&) {
-                self->addWarning(SOP_MESSAGE, ("skipped rebuild of level set grid "
-                    + src.getName() + " of type " + src.type()).c_str());
-                dest.reset();
+                try {
+                    dest = openvdb::tools::levelSetRebuild(src, /*iso=*/ZERO,
+                        /*exWidth=*/halfWidth, /*inWidth=*/halfWidth, &refXform, &interrupt);
+                } catch (openvdb::TypeError&) {
+                    self->addWarning(SOP_MESSAGE, ("skipped rebuild of level set grid "
+                        + src.getName() + " of type " + src.type()).c_str());
+                    dest.reset();
+                }
             }
         }
         if (!dest && src.constTransform() != refXform) {
@@ -644,6 +668,7 @@ SOP_OpenVDB_Merge::Cache::cookVDBSop(OP_Context& context)
         mergeOp.self = this;
         mergeOp.opRemap["op_sdf"] = evalStdString("op_sdf", mTime);
         mergeOp.opRemap["op_fog"] = evalStdString("op_fog", mTime);
+        mergeOp.opRemap["op_scalar"] = evalStdString("op_scalar", mTime);
 
         // extract non-const VDB primitives from first input
 
