@@ -28,10 +28,6 @@
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
 
-using SupportedGridT =
-    openvdb::TypeList<bool, int32_t, int64_t, float, double,
-        openvdb::Vec3f, openvdb::Vec3d, openvdb::Vec3i>;
-
 class SOP_OpenVDB_Particle_Surfacer: public openvdb_houdini::SOP_NodeVDB
 {
 public:
@@ -103,13 +99,13 @@ newSopOperator(OP_OperatorTable* table)
             "The default value 3 is recommended for level set volumes."));
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "rebuildlevelset", "Rebuild Level Set")
-        .setDefault(PRMoneDefaults)
+        .setDefault(PRMzeroDefaults)
         .setTooltip("Rebuild the level set after running the surfacing algorithm"));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "mergeoutput", "Merge Output VDBs")
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "outputseparate", "Output Separate VDBs")
         .setDefault(PRMoneDefaults)
-        .setTooltip("If enabled, all surfaces from different points VDBs or from Houdini points "
-                    "are merged into a single VDB, otherwise will output as separate VDBs"));
+        .setTooltip("If enabled, all surfaces from different point clouds (or VDB Points grids)"
+                    "will be output as individual SDFs, otherwise output will be the merged result."));
 
     parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sepOutput", ""));
 
@@ -118,7 +114,7 @@ newSopOperator(OP_OperatorTable* table)
         .setTooltip("The point attribute representing the particle radius,"
                     " if the attribute does not exist, a uniform value of 1 is assumed."));
 
-    parms.add(hutil::ParmFactory(PRM_FLT_J, "particleradius", "Radius Scale")
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "radiusscale", "Radius Scale")
         .setDefault(PRMoneDefaults)
         .setRange(PRM_RANGE_RESTRICTED, 0.0, PRM_RANGE_UI, 2.0)
         .setTooltip("A multiplier on the radius of the particles to be surfaced,"
@@ -141,7 +137,7 @@ newSopOperator(OP_OperatorTable* table)
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "useworldspaceinfluence", "Use World Space Influence Radius")
         .setDefault(PRMzeroDefaults)
         .setTooltip("If enabled, specify the influence radius explicitly in world space units, "
-                    "otherwise is specified as a scale on the average (scaled by above) particle radius."));
+                    "otherwise is specified as a scale on the average particle radius."));
 
     parms.add(hutil::ParmFactory(PRM_FLT_J, "influencescale", "Influence Radius Scale")
         .setDefault(PRMtwoDefaults)
@@ -168,14 +164,14 @@ newSopOperator(OP_OperatorTable* table)
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\
 \n\
-\"\"\"Converts points and points VDBs to a levelset surface.\"\"\"\n\
+\"\"\"Converts point clouds to SDF VDBs.\"\"\"\n\
 \n\
 @overview\n\
 \n\
-This node converts particles (points or VDB Points grids) to a levelset surface. Its modes\n\
-to allow different methods of performing this conversion. Points can stamp a simple spherical\n\
-footprint or use some more advanced methods to average (and smooth) their footprint, creating a\n\
-fluid-like surface.\n\
+This node converts point clouds (and VDB Points) to SDFs. \n\
+Points can stamp a simple spherical footprint or use an\n\
+averaged-position method and smooth their footprint, creating\n\
+fluid-like surfaces.\n\
 ");
 }
 
@@ -222,7 +218,7 @@ SOP_OpenVDB_Particle_Surfacer::SOP_OpenVDB_Particle_Surfacer(OP_Network* net,
 ////////////////////////////////////////
 
 template <typename FilterT, typename ...Args>
-inline openvdb::FloatGrid::Ptr raster(const Args&... args)
+openvdb::FloatGrid::Ptr rasterSpheres(const Args&... args)
 {
     return openvdb::points::rasterizeSpheres<
                 openvdb::points::PointDataGrid,
@@ -233,7 +229,7 @@ inline openvdb::FloatGrid::Ptr raster(const Args&... args)
 }
 
 template <typename FilterT, typename ...Args>
-inline openvdb::FloatGrid::Ptr rasterP(const Args&... args)
+openvdb::FloatGrid::Ptr rasterSpheresPScale(const Args&... args)
 {
     return openvdb::points::rasterizeSpheres<
                 openvdb::points::PointDataGrid,
@@ -245,7 +241,7 @@ inline openvdb::FloatGrid::Ptr rasterP(const Args&... args)
 }
 
 template <typename FilterT, typename ...Args>
-inline openvdb::FloatGrid::Ptr rasterZb(const Args&... args)
+openvdb::FloatGrid::Ptr rasterSmooth(const Args&... args)
 {
     return openvdb::points::rasterizeSmoothSpheres<
                 openvdb::points::PointDataGrid,
@@ -256,7 +252,7 @@ inline openvdb::FloatGrid::Ptr rasterZb(const Args&... args)
 }
 
 template <typename FilterT, typename ...Args>
-inline openvdb::FloatGrid::Ptr rasterZbP(const Args&... args)
+openvdb::FloatGrid::Ptr rasterSmoothPScale(const Args&... args)
 {
     return openvdb::points::rasterizeSmoothSpheres<
                 openvdb::points::PointDataGrid,
@@ -312,9 +308,9 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
         const Real influenceRadius = Real(evalFloat("influenceradius", 0, time));
         const Real influenceScale = Real(evalFloat("influencescale", 0, time));
         const std::string radiusAttributeName = evalStdString("radiusattribute", time);
-        const Real radiusScale = Real(evalFloat("particleradius", 0, time));
-        const bool rebuildLevelSet = static_cast<bool>(evalInt("rebuildlevelset", 0, time));
-        const bool mergeoutput = static_cast<bool>(evalInt("mergeoutput", 0, time));
+        const Real radiusScale = Real(evalFloat("radiusscale", 0, time));
+        const bool rebuild = static_cast<bool>(evalInt("rebuildlevelset", 0, time));
+        const bool separate = static_cast<bool>(evalInt("outputseparate", 0, time));
 
         std::vector<openvdb::points::PointDataGrid::ConstPtr> pointGrids;
         std::vector<GA_Offset> vdbPrimOffsets;
@@ -331,11 +327,11 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
 
             // only process if grid is a PointDataGrid
             auto gridPtr = openvdb::gridConstPtrCast<openvdb::points::PointDataGrid>(vdbPrim->getConstGridPtr());
-            if(!gridPtr) continue;
+            if (!gridPtr) continue;
             pointGrids.emplace_back(gridPtr);
         }
 
-        // Convert all Houdini points that don't reference a VDB into a new VDB
+        // Convert all Houdini points that don't reference a VDB into a new VDB Points grid
 
         if (pointGeo->getNumPoints() > vdbPrimOffsets.size()) {
             // compute auto voxel-size based on point distribution
@@ -352,15 +348,12 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
             }
 
             openvdb::points::PointDataGrid::Ptr houdiniPointsAsGridNonConst = hvdb::convertHoudiniToPointDataGrid(
-                *pointGeo, /*compression=*/1, attributes, *pointsTransform);
+                *pointGeo, /*compression=*/0, attributes, *pointsTransform);
             openvdb::points::PointDataGrid::ConstPtr houdiniPointsAsGrid = openvdb::ConstPtrCast<
                 const openvdb::points::PointDataGrid>(houdiniPointsAsGridNonConst);
             pointGrids.emplace_back(houdiniPointsAsGrid);
         }
-
-        std::vector<openvdb::FloatGrid::Ptr> gridsToMerge;
-        openvdb::FloatGrid::Ptr output;
-
+        std::vector<openvdb::FloatGrid::Ptr> outputs;
         // surface all point data grids
         for (const auto& points : pointGrids) {
             const auto iter = points->constTree().cbeginLeaf();
@@ -380,23 +373,23 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
             std::vector<std::string> include, exclude;
             points::AttributeSet::Descriptor::parseNames(include, exclude, groupStr);
 
-            // determine attributes to transfer
+            openvdb::FloatGrid::Ptr output;
 
             if (mode == SurfaceType::Spheres) {
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    if (hasPscale) output = rasterP<NullFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
-                    else           output = raster<NullFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterSpheresPScale<NullFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterSpheres<NullFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    if (hasPscale) output = rasterP<GroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
-                    else           output = raster<GroupFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterSpheresPScale<GroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterSpheres<GroupFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    if (hasPscale) output = rasterP<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
-                    else           output = raster<MultiGroupFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterSpheresPScale<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterSpheres<MultiGroupFilter>(*points, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
             }
             else { //mode == SurfaceType::ParticleFluid
@@ -408,51 +401,63 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
                 else {
                     scale = influenceScale * radiusScale;
                     if (hasPscale) {
-                        double avg;
+                        double avg(0.);
                         if (openvdb::points::evalAverage<float>(points->tree(), radiusAttributeName, avg)) scale *= avg;
                     }
                 }
 
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    if (hasPscale) output = rasterZbP<NullFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
-                    else           output = rasterZb<NullFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterSmoothPScale<NullFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterSmooth<NullFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    if (hasPscale) output = rasterZbP<GroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
-                    else           output = rasterZb<GroupFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterSmoothPScale<GroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterSmooth<GroupFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    if (hasPscale) output = rasterZbP<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
-                    else           output = rasterZb<MultiGroupFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    if (hasPscale) output = rasterSmoothPScale<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    else           output = rasterSmooth<MultiGroupFilter>(*points, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
             }
 
             if (output) {
-                if (rebuildLevelSet && !mergeoutput) {
-                    output = tools::levelSetRebuild(*output, 0, float(halfBand), float(halfBand));
-                }
                 output->setName(surfaceName);
-                if (mergeoutput) gridsToMerge.emplace_back(output);
-                else hvdb::createVdbPrimitive(*gdp, output);
+                outputs.emplace_back(output);
             }
         }
-        if (mergeoutput && !gridsToMerge.empty()) {
-            assert(gridsToMerge.front());
-            output = openvdb::FloatGrid::create(*gridsToMerge.front());
+        // if not outputting separate grids, merge results
+        if (!separate && outputs.size() > 1) {
+            assert(outputs.front());
+
+            openvdb::FloatGrid::Ptr output = openvdb::FloatGrid::create(outputs.front()->background());
+            output->setTransform(outputs.front()->transform().copy());
             output->setName(surfaceName);
+            output->setGridClass(openvdb::GRID_LEVEL_SET);
+
             openvdb::tree::DynamicNodeManager<openvdb::FloatTree> nodeManager(output->tree());
             std::vector<openvdb::tools::TreeToMerge<openvdb::FloatTree>> treesToMerge;
-            for (const auto& grid : gridsToMerge) treesToMerge.emplace_back(grid->tree(), openvdb::Steal());
-            nodeManager.foreachTopDown(openvdb::tools::CsgUnionOp<openvdb::FloatTree>(treesToMerge));
-            if (rebuildLevelSet) {
-                output = tools::levelSetRebuild(*output, 0, float(halfBand), float(halfBand));
+
+            for (const auto& grid : outputs) {
+                assert(grid);
+                treesToMerge.emplace_back(grid->tree(), openvdb::Steal());
             }
-            output->setName(surfaceName);
-            hvdb::createVdbPrimitive(*gdp, output);
+            nodeManager.foreachTopDown(openvdb::tools::CsgUnionOp<openvdb::FloatTree>(treesToMerge));
+
+            outputs.clear();
+            outputs.emplace_back(output);
         }
+
+        for (auto& grid : outputs) {
+            if (rebuild) {
+                assert(grid);
+                grid = openvdb::tools::levelSetRebuild(*grid, 0, float(halfBand), float(halfBand));
+            }
+            hvdb::createVdbPrimitive(*gdp, grid);
+        }
+
     } catch (std::exception& e) {
         addError(SOP_MESSAGE, e.what());
     }
