@@ -150,6 +150,7 @@ else()
     TestPointRasterizeFrustum.cc
     TestPointRasterizeSDF.cc
     TestPointRasterizeTrilinear.cc
+    TestPointReplicate.cc
     TestPointSample.cc
     TestPointScatter.cc
     TestPointStatistics.cc
@@ -172,6 +173,7 @@ else()
     TestTreeCombine.cc
     TestTreeGetSetValues.cc
     TestTreeIterators.cc
+    TestTypeList.cc
     TestTypes.cc
     TestUtil.cc
     TestValueAccessor.cc
