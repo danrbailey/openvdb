@@ -254,6 +254,7 @@ if(NOT OPENVDB_DSO_NAMES)
     SOP_OpenVDB_Morph_Level_Set
     SOP_OpenVDB_Noise
     SOP_OpenVDB_Occlusion_Mask
+    SOP_OpenVDB_Particle_Surfacer
     SOP_OpenVDB_Platonic
     SOP_OpenVDB_Points_Attribute
     SOP_OpenVDB_Points_Convert
