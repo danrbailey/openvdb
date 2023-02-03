@@ -31,6 +31,7 @@
 #include <openvdb/openvdb.h>
 #include <openvdb/Types.h>
 #include <openvdb/tools/Activate.h>
+#include <openvdb/tools/ChangeBackground.h>
 #include <openvdb/tools/Morphology.h>
 #include <openvdb/tools/Prune.h>
 
@@ -46,7 +47,8 @@ enum REGIONTYPE_NAMES
     REGIONTYPE_EXPAND,
     REGIONTYPE_REFERENCE,
     REGIONTYPE_DEACTIVATE,
-    REGIONTYPE_FILL
+    REGIONTYPE_FILL,
+    REGIONTYPE_BACKGROUND
 };
 
 enum OPERATION_NAMES
@@ -336,6 +338,24 @@ R"(Expand the convex hull by the specified distance.)"));
     values.   Tiles will remain sparse in this process.
 */
 
+    parms.addFolder("Background");
+/*
+    All background values will be replaced with the new specified value.
+*/
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "changebackground", "Change Background")
+        .setDefault(PRMoneDefaults)
+        .setTooltip("Change the background to the value specified.")
+        .setDocumentation(
+R"(If the toggle is selected, the value of the background will be changed 
+to the value specified in the Background Value parameter.)"));
+
+    parms.add(hutil::ParmFactory(PRM_XYZ, "backgroundvalue", "Background Value").setVectorSize(3)
+        .setTooltip("New value that will replace the current value of the background")
+        .setDocumentation(
+R"(New value that will replace the current value of the background.
+Note that the change background operation does not currently support
+level sets, so it will have no effect on those.)"));
+
     parms.endSwitcher();
 
     // Prune toggle
@@ -389,6 +409,9 @@ TIP: To see the current active region, you can use the VDB Visualize SOP
      and set it to Tree Nodes, Disabled; Active Constant Tiles, Wireframe Box;
      and Active Voxels, Wireframe Box.
 
+Note that the change background operation does not currently support
+level sets, so it will have no effect on those.
+
 @related
 
 - [Node:sop/vdb]
@@ -405,11 +428,9 @@ SOP_VDBActivate::updateParmsFlags()
     REGIONTYPE_NAMES regiontype = REGIONTYPE(0.0f);
     OPERATION_NAMES operation = OPERATION(0.0f);
 
-    bool        regionusesvalue = (regiontype != REGIONTYPE_EXPAND) && (regiontype != REGIONTYPE_DEACTIVATE);
+    bool        regionusesvalue = (regiontype == REGIONTYPE_POSITION) || (regiontype == REGIONTYPE_VOXEL) || (regiontype == REGIONTYPE_REFERENCE);
     bool        operationusesvalue = (operation == OPERATION_UNION) || (operation == OPERATION_COPY);
 
-    if (regiontype == REGIONTYPE_FILL)
-        regionusesvalue = false;
 
     // Disable the region type switcher
     int changed = 0;
@@ -429,6 +450,7 @@ SOP_VDBActivate::updateParmsFlags()
     changed += enableParm("setvalue", regionusesvalue && operationusesvalue);
     changed += enableParm("value", regionusesvalue && operationusesvalue && evalInt("setvalue", 0, 0.0));
     changed += enableParm("tolerance", (evalInt("prune", 0, 0.0f) != 0));
+    changed += enableParm("backgroundvalue", (evalInt("changebackground", 0, 0.0f) != 0));
     return changed > 0;
 }
 
@@ -982,6 +1004,28 @@ sopConvexHull(GridType& grid, const GU_ConvexHullHalfPlanesF &hull,
 }
 #endif
 
+// Convert a Vec3 value to a scalar value, if needed.
+template<typename ValueType>
+ValueType convertValue(const openvdb::Vec3R& val)
+{
+    if constexpr(openvdb::VecTraits<ValueType>::IsVec) {
+        return val;
+    }
+    else {
+        return static_cast<ValueType>(val[0]);
+    }
+}
+
+template <typename GridType>
+static void
+sopChangeBackground(GridType& grid, const openvdb::Vec3R& value)
+{
+
+    using ValueT = typename GridType::ValueType;
+    if (grid.getGridClass() != openvdb::GRID_LEVEL_SET) {
+        openvdb::tools::changeBackground(grid.tree(), convertValue<ValueT>(value));
+    }
+}
 
 template <typename GridType>
 static void
@@ -1278,6 +1322,18 @@ SOP_VDBActivate::Cache::cookVDBSop(OP_Context &context)
                                     vdb->getGrid(), 1);
 
                     break;
+                }
+
+                case REGIONTYPE_BACKGROUND:          // Change background value
+                {
+                    if (boss->opInterrupt())
+                        break;
+
+                    UTvdbCallAllTopology(vdb->getStorageType(),
+                                     sopChangeBackground,
+                                     vdb->getGrid(), evalVec3R("backgroundvalue", t));
+                    break;
+
                 }
 
             }
