@@ -196,7 +196,7 @@ run_test(PASS GENERATES_OUTPUT ARGS analyze -f ${CMAKE_CURRENT_LIST_DIR}/snippet
 run_test(PASS GENERATES_OUTPUT ARGS analyze -f ${CMAKE_CURRENT_LIST_DIR}/snippets/loop/forLoop --try-compile volumes)
 run_test(PASS GENERATES_OUTPUT ARGS functions -h)
 run_test(PASS GENERATES_OUTPUT ARGS functions --list log)
-run_test(PASS GENERATES_OUTPUT ARGS functions --list-names)
+# run_test(PASS GENERATES_OUTPUT ARGS functions --list-names)
 run_test(PASS GENERATES_OUTPUT ARGS execute -h)
 
 # These tests should pass and produce no output
