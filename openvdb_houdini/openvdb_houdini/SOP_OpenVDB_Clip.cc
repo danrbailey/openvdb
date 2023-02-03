@@ -7,16 +7,20 @@
 ///
 /// @brief Clip grids
 
-#include <houdini_utils/ParmFactory.h>
 #include <openvdb_houdini/GeometryUtil.h> // for drawFrustum(), frustumTransformFromCamera()
 #include <openvdb_houdini/Utils.h>
 #include <openvdb_houdini/SOP_NodeVDB.h>
+#include <openvdb_houdini/GU_PrimVDB.h>
+#include <houdini_utils/ParmFactory.h>
+
 #include <openvdb/tools/Clip.h> // for tools::clip()
 #include <openvdb/tools/LevelSetUtil.h> // for tools::sdfInteriorMask()
 #include <openvdb/tools/Mask.h> // for tools::interiorMask()
 #include <openvdb/tools/Morphology.h> // for tools::dilateActiveValues(), tools::erodeActiveValues()
 #include <openvdb/points/PointDataGrid.h>
-#include <OBJ/OBJ_Camera.h>
+#include <OBJ/OBJ_Camera.h> // HDK
+#include <GEO/GEO_PrimVolume.h>
+#include <UT/UT_Matrix.h>
 #include <cmath> // for std::abs(), std::round()
 #include <exception>
 #include <string>
@@ -139,6 +143,22 @@ Mask VDB:\n\
             "The position of the far clipping plane\n\n"
             "If enabled, this setting overrides the camera's clipping plane."));
 
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "usecamwindow", "Use Camera Window")
+        .setDefault(PRMoneDefaults)
+        .setTooltip("If enabled, use camera window to define extents.")
+        .setDocumentation(
+            "Use Camera Window parameters set in camera, to scale frustum extents.\n"));
+
+    parms.add(hutil::ParmFactory(PRM_XYZ, "winx", "Window X")
+        .setVectorSize(2)
+        .setDefault(PRMzeroDefaults)
+        .setTooltip("Window X size"));
+
+    parms.add(hutil::ParmFactory(PRM_XYZ, "winy", "Window Y")
+        .setVectorSize(2)
+        .setDefault(PRMzeroDefaults)
+        .setTooltip("Window Y size"));
+    
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "setpadding", "")
         .setDefault(PRMzeroDefaults)
         .setTypeExtended(PRM_TYPE_TOGGLE_JOIN)
@@ -232,6 +252,9 @@ SOP_OpenVDB_Clip::updateParmsFlags()
     changed |= enableParm("setfar", clipToCamera);
     changed |= enableParm("far", clipToCamera && evalInt("setfar", 0, 0.0));
     changed |= enableParm("padding", 0 != evalInt("setpadding", 0, 0.0));
+    changed |= enableParm("usecamwindow", clipToCamera);
+    changed |= enableParm("winx", clipToCamera);
+    changed |= enableParm("winy", clipToCamera);
 
     changed |= setVisibleState("mask", clipper == "mask");
     changed |= setVisibleState("camera", clipToCamera);
@@ -239,6 +262,9 @@ SOP_OpenVDB_Clip::updateParmsFlags()
     changed |= setVisibleState("near", clipToCamera);
     changed |= setVisibleState("setfar", clipToCamera);
     changed |= setVisibleState("far", clipToCamera);
+    changed |= setVisibleState("usecamwindow", clipToCamera);
+    changed |= setVisibleState("winx", clipToCamera);
+    changed |= setVisibleState("winy", clipToCamera);
 
     return changed;
 }
@@ -429,6 +455,7 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
 
     const auto time = context.getTime();
 
+    // Fetch Camera
     UT_String cameraPath;
     evalString(cameraPath, "camera", 0, time);
     if (!cameraPath.isstring()) {
@@ -446,12 +473,9 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
     }
     self->addExtraInput(camera, OP_INTEREST_DATA);
 
+    // Fetch Camera Parms
     OBJ_CameraParms cameraParms;
     camera->getCameraParms(cameraParms, time);
-    if (cameraParms.projection != OBJ_PROJ_PERSPECTIVE) {
-        throw std::runtime_error{cameraPath.toStdString() + " is not a perspective camera"};
-        /// @todo support ortho and other cameras?
-    }
 
     const bool pad = (0 != evalInt("setpadding", 0, time));
     const auto padding = pad ? evalVec3f("padding", time) : openvdb::Vec3f{0};
@@ -462,13 +486,68 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
     const float farPlane = (evalInt("setfar", 0, time)
         ? static_cast<float>(evalFloat("far", 0, time))
         : static_cast<float>(camera->getFAR(time))) + padding[2];
+ 
+    OP_Node* thissop = cookparms()->getCwd();
+    UT_Matrix4R camera_to_sop; 
+    OBJ_Node *meobj = thissop ? thissop->getCreator()->castToOBJNode() : 0;
 
-    mFrustum = hvdb::frustumTransformFromCamera(*self, context, *camera,
-        /*offset=*/0.f, nearPlane, farPlane, /*voxelDepth=*/1.f, /*voxelCountX=*/100);
+    if (meobj) {
+        if (!camera->getRelativeTransform(*meobj, camera_to_sop, context)){
+            addTransformError(*camera, "relative");
+            addExtraInput(meobj, OP_INTEREST_DATA);
+        }
+    }
+    else {
+        if (!camera->getWorldTransform(camera_to_sop, context)){
+            addTransformError(*camera, "world");
+        }    
+    }
 
-    if (!mFrustum || !mFrustum->constMap<openvdb::math::NonlinearFrustumMap>()) {
-        throw std::runtime_error{
-            "failed to compute frustum bounds for camera " + cameraPath.toStdString()};
+    // Compute frustum transform, w.r.t window size
+    GEO_PrimVolumeXform frustXform = GEO_PrimVolumeXform::cameraFrustum(
+        cameraParms.focal,
+        cameraParms.aperture,
+        UT_Vector2R(cameraParms.xres, cameraParms.yres),
+        cameraParms.aspect,
+        (cameraParms.projection == OBJ_PROJ_ORTHO),
+        cameraParms.orthoZoom,
+        nearPlane,
+        farPlane,
+        (evalInt("usecamwindow", 0, time) != 0), 
+        UT_BoundingRectR(
+            cameraParms.winx[0], cameraParms.winy[0],
+            cameraParms.winx[1], cameraParms.winy[1]),
+        UT_BoundingRectR(
+            cameraParms.cropx[0], cameraParms.cropy[0],
+            cameraParms.cropx[1], cameraParms.cropy[1]),
+        UT_BoundingRectR(
+            evalFloat("winx", 0, time), evalFloat("winy", 0, time),
+            evalFloat("winx", 1, time), evalFloat("winy", 1, time)),
+        camera_to_sop,
+        NULL); 
+
+    UT_Vector3R size = frustXform.computeSize();
+    
+    // Resolution just uses defaults here
+    UT_Vector3R res =  GEO_PrimVolumeXform::computeResolution( 
+        GEO_PrimVolumeXform::SamplingType::MAX_AXIS,
+        UT_Vector3R(10.f, 10.f, 10.f),
+        10,
+        0.1f,
+        1.f,
+        size
+    );
+
+    // Create temporary VDB to extract applied frustum transform from
+    openvdb::FloatGrid::Ptr grid = openvdb::FloatGrid::create(0.f);
+    GU_Detail gdp; 
+    GU_PrimVDB *primVDB = GU_PrimVDB::buildFromGrid(gdp, grid);
+    primVDB->setSpaceTransform(frustXform, res, true);
+    mFrustum = primVDB->getGrid().transformPtr();
+
+    if (!mFrustum || !mFrustum->constMap<openvdb::math::NonlinearFrustumMap>()){
+    throw std::runtime_error{
+        "failed to compute frustum bounds for camera " + cameraPath.toStdString()};
     }
 
     if (pad) {
@@ -478,7 +557,8 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
             (extents[0] + 2 * padding[0]) / extents[0],
             (extents[1] + 2 * padding[1]) / extents[1],
             1.0});
-    }
+    } 
+    
 }
 
 
