@@ -149,14 +149,15 @@ Mask VDB:\n\
         .setDocumentation(
             "Use Camera Window parameters set in camera, to scale frustum extents.\n"));
 
-    parms.add(hutil::ParmFactory(PRM_XYZ, "winx", "Window X")
+    std::vector<fpreal> def{0, 1};
+    parms.add(hutil::ParmFactory(PRM_FLT_E, "winx", "Window X")
         .setVectorSize(2)
-        .setDefault(PRMzeroDefaults)
+        .setDefault(def)
         .setTooltip("Window X size"));
 
-    parms.add(hutil::ParmFactory(PRM_XYZ, "winy", "Window Y")
+    parms.add(hutil::ParmFactory(PRM_FLT_E, "winy", "Window Y")
         .setVectorSize(2)
-        .setDefault(PRMzeroDefaults)
+        .setDefault(def)
         .setTooltip("Window Y size"));
     
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "setpadding", "")
