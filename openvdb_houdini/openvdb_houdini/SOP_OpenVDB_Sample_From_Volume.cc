@@ -527,8 +527,8 @@ openvdb::FloatGrid::ConstPtr mipLevel = nullptr, const SamplerTypes mipSampleTyp
 }
 
 // Different Mip Level Calculations
-// Standard practice e.g. OpenGL, use a max componentwise calculation but for non-standard grids e.g. frustum grids it may 
-// be preferable to use an average of all the components or some other method. This is configurable with the MipT template.
+// Standard practice e.g. OpenGL, use a max componentwise calculation but for non-standard grids e.g. frustum grids it may
+// be preferable to use an average of all the components or some other method. This is configurable with the MipCalcT template.
 
 struct MaxMip {
     template <typename ValueT>
