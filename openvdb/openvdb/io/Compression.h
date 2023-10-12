@@ -649,10 +649,6 @@ writeCompressedValues(std::ostream& os, ValueT* srcBuf, Index srcCount,
     const uint32_t compress = getDataCompression(os);
     const bool maskCompress = compress & COMPRESS_ACTIVE_MASK;
 
-    Index tempCount = srcCount;
-    ValueT* tempBuf = srcBuf;
-    std::unique_ptr<ValueT[]> scopedTempBuf;
-
     int8_t metadata = NO_MASK_AND_ALL_VALS;
 
     if (!maskCompress) {
@@ -705,8 +701,9 @@ writeCompressedValues(std::ostream& os, ValueT* srcBuf, Index srcCount,
             /// are one of two values?
         } else {
             // Create a new array to hold just the active values.
-            scopedTempBuf.reset(new ValueT[srcCount]);
-            tempBuf = scopedTempBuf.get();
+            Index tempCount = srcCount;
+            std::unique_ptr<ValueT[]> scopedTempBuf(new ValueT[srcCount]);
+            ValueT* tempBuf = scopedTempBuf.get();
 
             if (metadata == NO_MASK_OR_INACTIVE_VALS ||
                 metadata == NO_MASK_AND_MINUS_BG ||
@@ -737,14 +734,22 @@ writeCompressedValues(std::ostream& os, ValueT* srcBuf, Index srcCount,
                 // Write out the mask that selects between two inactive values.
                 selectionMask.save(os);
             }
+
+            // Write out the buffer.
+            if (toHalf) {
+                HalfWriter<RealToHalf<ValueT>::isReal, ValueT>::write(os, tempBuf, tempCount, compress);
+            } else {
+                writeData(os, tempBuf, tempCount, compress);
+            }
+            return;
         }
     }
 
     // Write out the buffer.
     if (toHalf) {
-        HalfWriter<RealToHalf<ValueT>::isReal, ValueT>::write(os, tempBuf, tempCount, compress);
+        HalfWriter<RealToHalf<ValueT>::isReal, ValueT>::write(os, srcBuf, srcCount, compress);
     } else {
-        writeData(os, tempBuf, tempCount, compress);
+        writeData(os, srcBuf, srcCount, compress);
     }
 }
 
