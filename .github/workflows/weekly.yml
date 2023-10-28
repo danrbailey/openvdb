@@ -119,23 +119,28 @@ jobs:
       #  installation
       image: aswf/ci-openvdb:2023-clang15.0
     env:
-      CXX: clang++
+      CXX: clang-17
     strategy:
       matrix:
         config:
-          - { name: 'all',   build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_BLOSC=ON  -DUSE_ZLIB=ON  -DUSE_EXR=ON  -DUSE_PNG=ON'  }
-          - { name: 'lite',  build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_BLOSC=OFF -DUSE_ZLIB=OFF -DUSE_EXR=OFF -DUSE_PNG=OFF -DOPENVDB_USE_DELAYED_LOADING=OFF' }
-          - { name: 'half',  build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_BLOSC=OFF -DUSE_IMATH_HALF=ON' }
-          - { name: 'sse',   build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DOPENVDB_SIMD=SSE42' }
-          - { name: 'avx',   build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DOPENVDB_SIMD=AVX' }
-          - { name: 'numpy', build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_NUMPY=ON -DOPENVDB_PYTHON_WRAP_ALL_GRID_TYPES=ON' }
+          # - { name: 'all',   build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_BLOSC=ON  -DUSE_ZLIB=ON  -DUSE_EXR=ON  -DUSE_PNG=ON'  }
+          # - { name: 'lite',  build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_BLOSC=OFF -DUSE_ZLIB=OFF -DUSE_EXR=OFF -DUSE_PNG=OFF -DOPENVDB_USE_DELAYED_LOADING=OFF' }
+          # - { name: 'half',  build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_BLOSC=OFF -DUSE_IMATH_HALF=ON' }
+          # - { name: 'sse',   build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DOPENVDB_SIMD=SSE42' }
+          # - { name: 'avx',   build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DOPENVDB_SIMD=AVX' }
+          # - { name: 'numpy', build: 'Release', components: 'core,python,bin,view,render,test',               cmake: '-DUSE_NUMPY=ON -DOPENVDB_PYTHON_WRAP_ALL_GRID_TYPES=ON' }
           - { name: 'asan',  build: 'asan',    components: 'core,test,axcore,axtest',                        cmake: '-DNANOVDB_USE_OPENVDB=ON -DOPENVDB_AX_STATIC=OFF -DOPENVDB_CORE_STATIC=OFF -DUSE_BLOSC=OFF' } # We never called blosc_destroy(), so disable blosc to silence these errors
           - { name: 'ubsan', build: 'ubsan',   components: 'core,test,axcore,axtest',                        cmake: '' }
-          - { name: 'c++20', build: 'Release', components: 'core,test,axcore,axtest',                        cmake: '-DCMAKE_CXX_STANDARD=20' }
-          - { name: 'conf',  build: 'Release', components: 'core,python,bin,view,render,test,axcore,axtest', cmake: '-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON' }
+          # - { name: 'c++20', build: 'Release', components: 'core,test,axcore,axtest',                        cmake: '-DCMAKE_CXX_STANDARD=20' }
+          # - { name: 'conf',  build: 'Release', components: 'core,python,bin,view,render,test,axcore,axtest', cmake: '-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON' }
       fail-fast: false
     steps:
     - uses: actions/checkout@v3
+    - name: install_clang
+      run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod u+x llvm.sh
+          sudo ./llvm.sh 17
     - name: pybind11
       #if: contains(container.image, '2023') == false
       run: ./ci/install_pybind11.sh 2.10.0

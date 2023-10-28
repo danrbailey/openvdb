@@ -67,10 +67,14 @@ public:
         , mTolerance(tolerance) { }
 
     inline bool check(const ValueT& value) const {
-        // math::isApproxEqual is marginally more expensive,
-        // so opt to do direct comparison if tolerance is ignored
-        if (IgnoreTolerance)    return value == mValue;
-        return math::isApproxEqual(value, mValue, mTolerance);
+        if (constexpr std::is_same<ValueT, bool>::value) {
+            return bool(value) == bool(mValue);
+        } else {
+            // math::isApproxEqual is marginally more expensive,
+            // so opt to do direct comparison if tolerance is ignored
+            if (IgnoreTolerance)    return value == mValue;
+            return math::isApproxEqual(value, mValue, mTolerance);
+        }
     }
 
     bool operator()(RootT& root, size_t) const
