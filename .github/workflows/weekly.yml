@@ -180,6 +180,7 @@ jobs:
             wget https://apt.llvm.org/llvm.sh
             chmod u+x llvm.sh
             sudo ./llvm.sh 17
+            ls /usr/bin/clang*
           elif [ "$RUNNER_OS" == "macOS" ]; then
             ./ci/install_macos.sh 15
           else
