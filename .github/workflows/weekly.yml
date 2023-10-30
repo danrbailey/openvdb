@@ -167,7 +167,7 @@ jobs:
       matrix:
         config:
           # - { runson: ubuntu-latest, cxx: g++,     cmake: '' }
-          - { runson: ubuntu-latest, cxx: clang-17, cmake: '' }
+          - { runson: ubuntu-latest, cxx: clang++-17, cmake: '' }
           # @todo gcc on macos
           # - { runson: macos-latest,  cxx: '',      cmake: '-D CMAKE_CXX_COMPILER=/usr/local/opt/llvm@15/bin/clang++' }
       fail-fast: false
