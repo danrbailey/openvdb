@@ -141,6 +141,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod u+x llvm.sh
           sudo ./llvm.sh 17
+          ls /usr/bin/clang*
     - name: pybind11
       #if: contains(container.image, '2023') == false
       run: ./ci/install_pybind11.sh 2.10.0
