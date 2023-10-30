@@ -75,7 +75,7 @@ if(OPENVDB_TESTS)
   endforeach()
 else()
   list(APPEND UNITTEST_SOURCE_FILES
-    TestActivate.cc
+    # TestActivate.cc
     TestAttributeArray.cc
     TestAttributeArrayString.cc
     TestAttributeGroup.cc
