@@ -14,31 +14,31 @@
 #include <blosc.h>
 #endif
 
-#if OPENVDB_ABI_VERSION_NUMBER <= 7
-    #error ABI <= 7 is no longer supported
+#if OPENVDB_ABI_VERSION_NUMBER <= 8
+    #error ABI <= 8 is no longer supported
 #endif
 
 // If using an OPENVDB_ABI_VERSION_NUMBER that has been deprecated, issue an
 // error directive. This can be optionally suppressed by defining:
 //   OPENVDB_USE_DEPRECATED_ABI_<VERSION>=ON.
-#ifndef OPENVDB_USE_DEPRECATED_ABI_8
-    #if OPENVDB_ABI_VERSION_NUMBER == 8
-        #error ABI = 8 is deprecated, CMake option OPENVDB_USE_DEPRECATED_ABI_8 suppresses this error
-    #endif
-#endif
 #ifndef OPENVDB_USE_DEPRECATED_ABI_9
     #if OPENVDB_ABI_VERSION_NUMBER == 9
         #error ABI = 9 is deprecated, CMake option OPENVDB_USE_DEPRECATED_ABI_9 suppresses this error
+    #endif
+#endif
+#ifndef OPENVDB_USE_DEPRECATED_ABI_10
+    #if OPENVDB_ABI_VERSION_NUMBER == 10
+        #error ABI = 10 is deprecated, CMake option OPENVDB_USE_DEPRECATED_ABI_10 suppresses this error
     #endif
 #endif
 
 // If using a future OPENVDB_ABI_VERSION_NUMBER, issue an error directive.
 // This can be optionally suppressed by defining:
 //   OPENVDB_USE_FUTURE_ABI_<VERSION>=ON.
-#ifndef OPENVDB_USE_FUTURE_ABI_11
-    #if OPENVDB_ABI_VERSION_NUMBER == 11
-        #error ABI = 11 is still in active development and has not been finalized, \
-CMake option OPENVDB_USE_FUTURE_ABI_11 suppresses this error
+#ifndef OPENVDB_USE_FUTURE_ABI_12
+    #if OPENVDB_ABI_VERSION_NUMBER == 12
+        #error ABI = 12 is still in active development and has not been finalized, \
+CMake option OPENVDB_USE_FUTURE_ABI_12 suppresses this error
     #endif
 #endif
 
@@ -47,8 +47,12 @@ OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
 
 namespace {
-// Declare this at file scope to ensure thread-safe initialization.
-std::mutex sInitMutex;
+inline std::mutex& GetInitMutex()
+{
+    static std::mutex sInitMutex;
+    return sInitMutex;
+}
+
 std::atomic<bool> sIsInitialized{false};
 }
 
@@ -61,7 +65,7 @@ void
 initialize()
 {
     if (sIsInitialized.load(std::memory_order_acquire)) return;
-    std::lock_guard<std::mutex> lock(sInitMutex);
+    std::lock_guard<std::mutex> lock(GetInitMutex());
     if (sIsInitialized.load(std::memory_order_acquire)) return; // Double-checked lock
 
     logging::initialize();
@@ -110,7 +114,7 @@ __pragma(warning(default:1711))
 void
 uninitialize()
 {
-    std::lock_guard<std::mutex> lock(sInitMutex);
+    std::lock_guard<std::mutex> lock(GetInitMutex());
 #ifdef __ICC
 // Disable ICC "assignment to statically allocated variable" warning.
 // This assignment is mutex-protected and therefore thread-safe.
