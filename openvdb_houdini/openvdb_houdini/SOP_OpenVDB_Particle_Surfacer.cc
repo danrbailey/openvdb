@@ -424,7 +424,6 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
             }
 
             if (output) {
-                output->setName(surfaceName);
                 outputs.emplace_back(output);
             }
         }
@@ -434,7 +433,6 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
 
             openvdb::FloatGrid::Ptr output = openvdb::FloatGrid::create(outputs.front()->background());
             output->setTransform(outputs.front()->transform().copy());
-            output->setName(surfaceName);
             output->setGridClass(openvdb::GRID_LEVEL_SET);
 
             openvdb::tree::DynamicNodeManager<openvdb::FloatTree> nodeManager(output->tree());
@@ -455,6 +453,7 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
                 assert(grid);
                 grid = openvdb::tools::levelSetRebuild(*grid, 0, float(halfBand), float(halfBand));
             }
+            grid->setName(surfaceName);
             hvdb::createVdbPrimitive(*gdp, grid);
         }
 
