@@ -476,23 +476,24 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
             const points::AttributeSet::Descriptor&
                 descriptor = iter->attributeSet().descriptor();
             const bool hasPscale(iter->hasAttribute(radiusAttributeName));
-
+            const std::string& radNameOrEmpty = hasPscale ? radiusAttributeName : "";
             if (mode == SurfaceType::Spheres) {
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    output = rasterSpheres<NullFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    output = rasterSpheres<NullFilter>(*points, radNameOrEmpty, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    output = rasterSpheres<GroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    output = rasterSpheres<GroupFilter>(*points, radNameOrEmpty, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    output = rasterSpheres<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, halfBand, sdfTransform, filter, &boss);
+                    output = rasterSpheres<MultiGroupFilter>(*points, radNameOrEmpty, radiusScale, halfBand, sdfTransform, filter, &boss);
                 }
             }
             else if (mode == SurfaceType::Ellipsoids) {
                 const size_t vectorRadiusIdx = descriptor.find(vectorRadiusAttributeName);
+                const std::string& vectorRadNameOrEmpty = vectorRadiusIdx != openvdb::points::AttributeSet::INVALID_POS ? vectorRadiusAttributeName : "";
                 if (vectorRadiusIdx != openvdb::points::AttributeSet::INVALID_POS && descriptor.valueType(vectorRadiusIdx) !=
                     std::string("vec3s")) {
                     throw std::runtime_error("Wrong attribute type for attribute " + vectorRadiusAttributeName + ", expected vec3s");
@@ -508,15 +509,15 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
 
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    output = rasterEllipsoids<NullFilter>(*points, vectorRadiusAttributeName, vectorRadiusScale, orientAttributeName,  "", halfBand, sdfTransform, filter, &boss);
+                    output = rasterEllipsoids<NullFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, orientAttributeName,  "", halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    output = rasterEllipsoids<GroupFilter>(*points, vectorRadiusAttributeName, vectorRadiusScale, orientAttributeName, "",  halfBand, sdfTransform, filter, &boss);
+                    output = rasterEllipsoids<GroupFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, orientAttributeName, "",  halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    output = rasterEllipsoids<MultiGroupFilter>(*points, vectorRadiusAttributeName, vectorRadiusScale, orientAttributeName, "", halfBand, sdfTransform, filter, &boss);
+                    output = rasterEllipsoids<MultiGroupFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, orientAttributeName, "", halfBand, sdfTransform, filter, &boss);
                 }
             }
             else if (mode == SurfaceType::ParticleFluid) {
@@ -538,15 +539,15 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
 
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    output = rasterSmoothSpheres<NullFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    output = rasterSmoothSpheres<NullFilter>(*points, radNameOrEmpty, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    output = rasterSmoothSpheres<GroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    output = rasterSmoothSpheres<GroupFilter>(*points, radNameOrEmpty, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    output = rasterSmoothSpheres<MultiGroupFilter>(*points, radiusAttributeName, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
+                    output = rasterSmoothSpheres<MultiGroupFilter>(*points, radNameOrEmpty, radiusScale, scale, halfBand, sdfTransform, filter, &boss);
                 }
             }
             else { //mode == SurfaceType::EllipsoidFluid
@@ -585,7 +586,7 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
                 openvdb::points::pca<PointDataGrid, openvdb::points::NullFilter, hvdb::HoudiniInterrupter>(*pointsCopy, s, a, &boss);
                 openvdb::tree::LeafManager<openvdb::points::PointDataGrid::TreeType> manager(pointsCopy->tree());
                 // scale the stretch attribute by the radius attribute
-                if (radiusAttributeName!="") {
+                if (hasPscale) {
                     manager.foreach([&](openvdb::points::PointDataTree::LeafNodeType& leafnode, size_t) {
                         openvdb::points::AttributeWriteHandle<openvdb::Vec3f> stretchHandle(leafnode.attributeArray(a.stretch));
                         openvdb::points::AttributeHandle<float> radHandle(leafnode.constAttributeArray(radiusAttributeName));
