@@ -145,7 +145,7 @@ void computeIOStats(const TreeT& tree, std::string gridClass)
 inline void ioStats(const GridBase& grid)
 {
     std::stringstream ss;
-    auto gridClass = gridBase.getGridClass();
+    auto gridClass = grid.getGridClass();
     if (gridClass == GRID_LEVEL_SET)        ss << "levelset";
     else if (gridClass == GRID_STAGGERED)   ss << "staggered";
     else if (gridClass == GRID_FOG_VOLUME)  ss << "fog";
@@ -153,7 +153,7 @@ inline void ioStats(const GridBase& grid)
     std::string gridClassStr = ss.str();
 
     // dynamic dispatch to typed computeIOStats method
-    gridBase.apply<GridTypes>(
+    grid.apply<GridTypes>(
         [&](auto& grid) { io_stats_internal::computeIOStats(grid.tree(), gridClassStr); }
     );
 }
