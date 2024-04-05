@@ -10,7 +10,6 @@
 #include <openvdb_houdini/GeometryUtil.h> // for drawFrustum(), frustumTransformFromCamera()
 #include <openvdb_houdini/Utils.h>
 #include <openvdb_houdini/SOP_NodeVDB.h>
-#include <openvdb_houdini/GU_PrimVDB.h>
 #include <houdini_utils/ParmFactory.h>
 
 #include <openvdb/tools/Clip.h> // for tools::clip()
@@ -20,6 +19,7 @@
 #include <openvdb/points/PointDataGrid.h>
 #include <OBJ/OBJ_Camera.h> // HDK
 #include <GEO/GEO_PrimVolume.h>
+#include <GU/GU_PrimVDB.h>
 #include <UT/UT_Matrix.h>
 #include <cmath> // for std::abs(), std::round()
 #include <exception>
@@ -159,7 +159,7 @@ Mask VDB:\n\
         .setVectorSize(2)
         .setDefault(def)
         .setTooltip("Window Y size"));
-    
+
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "setpadding", "")
         .setDefault(PRMzeroDefaults)
         .setTypeExtended(PRM_TYPE_TOGGLE_JOIN)
@@ -487,9 +487,9 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
     const float farPlane = (evalInt("setfar", 0, time)
         ? static_cast<float>(evalFloat("far", 0, time))
         : static_cast<float>(camera->getFAR(time))) + padding[2];
- 
+
     OP_Node* thissop = cookparms()->getCwd();
-    UT_Matrix4R camera_to_sop; 
+    UT_Matrix4R camera_to_sop;
     OBJ_Node *meobj = thissop ? thissop->getCreator()->castToOBJNode() : 0;
 
     if (meobj) {
@@ -501,7 +501,7 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
     else {
         if (!camera->getWorldTransform(camera_to_sop, context)){
             addTransformError(*camera, "world");
-        }    
+        }
     }
 
     // Compute frustum transform, w.r.t window size
@@ -514,7 +514,7 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
         cameraParms.orthoZoom,
         nearPlane,
         farPlane,
-        (evalInt("usecamwindow", 0, time) != 0), 
+        (evalInt("usecamwindow", 0, time) != 0),
         UT_BoundingRectR(
             cameraParms.winx[0], cameraParms.winy[0],
             cameraParms.winx[1], cameraParms.winy[1]),
@@ -525,12 +525,12 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
             evalFloat("winx", 0, time), evalFloat("winy", 0, time),
             evalFloat("winx", 1, time), evalFloat("winy", 1, time)),
         camera_to_sop,
-        NULL); 
+        NULL);
 
     UT_Vector3R size = frustXform.computeSize();
-    
+
     // Resolution just uses defaults here
-    UT_Vector3R res =  GEO_PrimVolumeXform::computeResolution( 
+    UT_Vector3R res =  GEO_PrimVolumeXform::computeResolution(
         GEO_PrimVolumeXform::SamplingType::MAX_AXIS,
         UT_Vector3R(10.f, 10.f, 10.f),
         10,
@@ -541,7 +541,7 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
 
     // Create temporary VDB to extract applied frustum transform from
     openvdb::FloatGrid::Ptr grid = openvdb::FloatGrid::create(0.f);
-    GU_Detail gdp; 
+    GU_Detail gdp;
     GU_PrimVDB *primVDB = GU_PrimVDB::buildFromGrid(gdp, grid);
     primVDB->setSpaceTransform(frustXform, res, true);
     mFrustum = primVDB->getGrid().transformPtr();
@@ -558,8 +558,8 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
             (extents[0] + 2 * padding[0]) / extents[0],
             (extents[1] + 2 * padding[1]) / extents[1],
             1.0});
-    } 
-    
+    }
+
 }
 
 
