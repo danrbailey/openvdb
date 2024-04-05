@@ -13,6 +13,8 @@
 #include <openvdb/util/logging.h>
 #include <openvdb/openvdb.h>
 
+#include <openvdb/tools/IOStats.h>
+
 #ifdef OPENVDB_USE_DELAYED_LOADING
 // Boost.Interprocess uses a header-only portion of Boost.DateTime
 #ifdef __clang__
@@ -1508,6 +1510,8 @@ Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
         // Now seek back to the end.
         gd.seekToEnd(os);
     }
+
+    tools::ioStats(*grid);
 }
 
 
