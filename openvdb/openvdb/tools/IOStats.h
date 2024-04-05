@@ -121,7 +121,7 @@ void computeIOStats(const TreeT& tree, std::string gridClass)
         ss << gridClass << "_" << tree.valueType();
         std::string platform = ss.str();
 
-        AppStats::Sample sample("vdbio-beta3", "count", platform);
+        AppStats::Sample sample("vdbio-v1", "count", platform);
 
         if (op.nodeCompress0 > 0)   sample.send("node0", op.nodeCompress0);
         if (op.nodeCompress1 > 0)   sample.send("node1", op.nodeCompress1);
