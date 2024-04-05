@@ -139,7 +139,10 @@ void computeIOStats(const TreeT& tree, std::string gridClass)
     }
 }
 
-void computeIOStats(const GridBase& gridBase)
+} // namespace io_stats_internal
+
+/// @brief Write out IO stats to AppStats
+inline void ioStats(const GridBase& grid)
 {
     std::stringstream ss;
     auto gridClass = gridBase.getGridClass();
@@ -151,16 +154,8 @@ void computeIOStats(const GridBase& gridBase)
 
     // dynamic dispatch to typed computeIOStats method
     gridBase.apply<GridTypes>(
-        [&](auto& grid) { computeIOStats(grid.tree(), gridClassStr); }
+        [&](auto& grid) { io_stats_internal::computeIOStats(grid.tree(), gridClassStr); }
     );
-}
-
-} // namespace io_stats_internal
-
-/// @brief Write out IO stats to AppStats
-void ioStats(const GridBase& grid)
-{
-    io_stats_internal::computeIOStats(grid);
 }
 
 
