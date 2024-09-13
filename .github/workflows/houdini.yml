@@ -165,7 +165,7 @@ jobs:
     #   run: ./ci/install_macos.sh ${{ matrix.config.llvm }}
     - name: build
       run: |
-        ./ci/build.sh -v \
+        /usr/local/bin/bash ./ci/build.sh -v \
           --build-type=Release \
           --components="core,hou,bin,view,render,python,test,axcore,axbin,axtest" \
           --cargs=\" \
