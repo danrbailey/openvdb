@@ -79,8 +79,13 @@ LARGS_STR=${LARGS_STR// /,}
 SARGS_STR="${OPTS_ARGS[@]}"
 SARGS_STR=${SARGS_STR// /,}
 
+echo "GETOPT"
+echo "SARGS_STR: ${SARGS_STR}"
+echo "LARGS_STR: ${LARGS_STR}"
+echo "@: $@"
+
 # Parse all arguments and store them in an array, split by whitespace. Error if unsupported
-ARGS="$(eval getopt --options=$SARGS_STR --longoptions=$LARGS_STR -- "$@")"
+ARGS="$(eval getopt --options=$SARGS_STR --longoptions=$LARGS_STR -- \"$@\")"
 eval set -- "$ARGS"
 
 # split into associative array
