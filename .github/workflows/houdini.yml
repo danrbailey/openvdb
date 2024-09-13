@@ -161,8 +161,8 @@ jobs:
     #     mkdir $HOME/houdini_install
     #     cp hou/hou.tar.gz $HOME/houdini_install/hou.tar.gz
     #     cd $HOME/houdini_install && tar -xzf hou.tar.gz && cd -
-    # - name: install_deps
-    #   run: ./ci/install_macos.sh ${{ matrix.config.llvm }}
+    - name: install_deps
+      run: ./ci/install_macos.sh ${{ matrix.config.llvm }}
     - name: build
       run: |
         /usr/local/bin/bash ./ci/build.sh -v \
