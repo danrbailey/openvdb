@@ -127,7 +127,7 @@ jobs:
       id: timestamp
       run: echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
     - name: download_houdini
-      run: ./ci/download_houdini.sh 20.0 macosx_x86_64_clang12.0_11 --prod
+      run: ./ci/download_houdini.sh 20.0 macosx_arm64_clang14.0_13 --prod
     - name: install_houdini
       run: |
         mkdir $HOME/houdini_install
@@ -216,6 +216,7 @@ jobs:
             sudo apt-get -q install -y libboost-dev libboost-iostreams-dev libtbb-dev libblosc-dev llvm-dev libgtest-dev libcppunit-dev pybind11-dev
           elif [ "$RUNNER_OS" == "macOS" ]; then
             ./ci/install_macos.sh 15
+            ./ci/install_tbb_macos.sh
           else
             echo "$RUNNER_OS not supported"; exit 1
           fi
@@ -317,7 +318,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: install_deps
-        run: ./ci/install_macos.sh ${{ matrix.config.llvm }}
+        run: |
+          ./ci/install_macos.sh ${{ matrix.config.llvm }}
+          ./ci/install_tbb_macos.sh
       - name: build
         run: >
           ./ci/build.sh -v
