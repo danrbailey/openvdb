@@ -152,17 +152,17 @@ jobs:
         path: hou
         key: dummy-houdini
         restore-keys: vdb-v5-houdini-macos-
-    - name: validate_houdini
-      run: test -f "hou/hou.tar.gz"
+    # - name: validate_houdini
+    #   run: test -f "hou/hou.tar.gz"
       # Make sure that the unpacked install is NOT in the root of the OpenVDB checkout
       # otherwise CMake's install RPATHs wil not work correctly.
-    - name: install_houdini
-      run: |
-        mkdir $HOME/houdini_install
-        cp hou/hou.tar.gz $HOME/houdini_install/hou.tar.gz
-        cd $HOME/houdini_install && tar -xzf hou.tar.gz && cd -
-    - name: install_deps
-      run: ./ci/install_macos.sh ${{ matrix.config.llvm }}
+    # - name: install_houdini
+    #   run: |
+    #     mkdir $HOME/houdini_install
+    #     cp hou/hou.tar.gz $HOME/houdini_install/hou.tar.gz
+    #     cd $HOME/houdini_install && tar -xzf hou.tar.gz && cd -
+    # - name: install_deps
+    #   run: ./ci/install_macos.sh ${{ matrix.config.llvm }}
     - name: build
       run: |
         ./ci/build.sh -v \
