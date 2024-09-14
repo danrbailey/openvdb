@@ -169,6 +169,7 @@ jobs:
           --build-type=Release \
           --components="core,hou,bin,view,render,python,test,axcore,axbin,axtest" \
           --cargs=\" \
+            -DPython_EXECUTABLE=/usr/bin/python3 \
             -DHOUDINI_ROOT=$HOME/houdini_install/hou \
             -DOPENVDB_BUILD_HOUDINI_ABITESTS=OFF \
             -DOPENVDB_HOUDINI_INSTALL_PREFIX=/tmp \
