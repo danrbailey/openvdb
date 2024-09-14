@@ -180,4 +180,4 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install \
             \"
     - name: test
-      run: cd build && ctest -V
+      run: cd build && otool -L /Users/runner/work/openvdb/openvdb/build/openvdb/openvdb/python/pyopenvdb.cpython-312-darwin.so && ctest -V
