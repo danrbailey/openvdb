@@ -153,10 +153,10 @@ newSopOperator(OP_OperatorTable* table)
         .setTooltip("A multiplier on the radius of the particles to be surfaced,"
                     " if no radius attribute is supplied this becomes the particle radius."));
 
-    parms.add(hutil::ParmFactory(PRM_STRING, "orientattribute", "Orient Attribute")
+    parms.add(hutil::ParmFactory(PRM_STRING, "rotationattribute", "Rotation Attribute")
         .setDefault("orient")
-        .setTooltip("The point attribute representing the ellipsoid orientation, "
-                    "this must be a 3x3 rotation matrix (mat3s)."));
+        .setTooltip("The point attribute representing the ellipsoid rotation, "
+                    "this must be a 3x3 rotation matrix (mat3s) and is mandatory."));
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "useworldspaceinfluence", "Use World Space Influence Radius")
         .setDefault(PRMzeroDefaults)
@@ -251,8 +251,8 @@ SOP_OpenVDB_Particle_Surfacer::updateParmsFlags()
     changed |= setVisibleState("vectorradiusattribute", ellipsoids);
     changed |= enableParm("radiusscale", !ellipsoids);
     changed |= enableParm("radiusattribute", !ellipsoids);
-    changed |= enableParm("orientattribute", ellipsoids);
-    changed |= setVisibleState("orientattribute", ellipsoids);
+    changed |= enableParm("rotationattribute", ellipsoids);
+    changed |= setVisibleState("rotationattribute", ellipsoids);
     changed |= setVisibleState("useworldspaceinfluence", requiresInfluence);
     changed |= setVisibleState("sepInfluence", requiresInfluence);
     changed |= enableParm("influencescale", requiresInfluence && !absoluteInfluence);
@@ -337,7 +337,7 @@ template <typename FilterT>
 openvdb::FloatGrid::Ptr rasterEllipsoids(const openvdb::points::PointDataGrid& points,
     const std::string& vectorRadiusAttributeName,
     const openvdb::Vec3f& vectorRadiusScale,
-    const std::string& orientAttributeName,
+    const std::string& rotationAttributeName,
     const std::string& posWSAttributeName,
     const float halfBand,
     const openvdb::math::Transform::Ptr sdfTransform,
@@ -353,7 +353,7 @@ openvdb::FloatGrid::Ptr rasterEllipsoids(const openvdb::points::PointDataGrid& p
     settings.filter = &filter;
 
     settings.radius = vectorRadiusAttributeName;
-    settings.rotation = orientAttributeName;
+    settings.rotation = rotationAttributeName;
     settings.pws = posWSAttributeName;
 
     openvdb::GridPtrVec resultsVec = openvdb::points::rasterizeSdf(points, settings);
@@ -499,25 +499,25 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
                     throw std::runtime_error("Wrong attribute type for attribute " + vectorRadiusAttributeName + ", expected vec3s");
                 }
 
-                const std::string& orientAttributeName = evalStdString("orientattribute", time);
-                const size_t orientIdx = descriptor.find(orientAttributeName);
+                const std::string& rotationAttributeName = evalStdString("rotationattribute", time);
+                const size_t rotationIdx = descriptor.find(rotationAttributeName);
 
-                if (orientIdx != openvdb::points::AttributeSet::INVALID_POS && descriptor.valueType(orientIdx) !=
+                if (rotationIdx != openvdb::points::AttributeSet::INVALID_POS && descriptor.valueType(rotationIdx) !=
                     std::string("mat3s")) {
-                    throw std::runtime_error("Wrong attribute type for attribute " + orientAttributeName + ", expected mat3s");
+                    throw std::runtime_error("Wrong attribute type for attribute " + rotationAttributeName + ", expected mat3s");
                 }
 
                 if (exclude.empty() && include.empty()) {
                     NullFilter filter;
-                    output = rasterEllipsoids<NullFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, orientAttributeName,  "", halfBand, sdfTransform, filter, &boss);
+                    output = rasterEllipsoids<NullFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, rotationAttributeName,  "", halfBand, sdfTransform, filter, &boss);
                 }
                 else if (exclude.empty() && include.size() == 1) {
                     GroupFilter filter(include.front(), iter->attributeSet());
-                    output = rasterEllipsoids<GroupFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, orientAttributeName, "",  halfBand, sdfTransform, filter, &boss);
+                    output = rasterEllipsoids<GroupFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, rotationAttributeName, "",  halfBand, sdfTransform, filter, &boss);
                 }
                 else {
                     MultiGroupFilter filter(include, exclude, iter->attributeSet());
-                    output = rasterEllipsoids<MultiGroupFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, orientAttributeName, "", halfBand, sdfTransform, filter, &boss);
+                    output = rasterEllipsoids<MultiGroupFilter>(*points, vectorRadNameOrEmpty, vectorRadiusScale, rotationAttributeName, "", halfBand, sdfTransform, filter, &boss);
                 }
             }
             else if (mode == SurfaceType::ParticleFluid) {
