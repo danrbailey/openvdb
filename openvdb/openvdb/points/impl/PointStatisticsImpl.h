@@ -347,7 +347,7 @@ bool evalAverage(const PointDataTreeT& points,
                 if (filter.state() == index::ALL) {
                     std::unique_ptr<Sample> S(new Sample(ResultT(handle.get(0)), 1));
                     if (handle.isUniform()) {
-                        S->avg = S->avg / static_cast<double>(size);
+                        S->avg = handle.get(Index(0));
                         S->size = size;
                     }
                     else {
@@ -433,11 +433,14 @@ bool accumulate(const PointDataTreeT& points,
                 AttributeHandle<ValueT, CodecT> handle(leaf->constAttributeArray(idx));
                 if (handle.size() == 0) continue;
                 if (filter.state() == index::ALL) {
-                    const size_t size = handle.isUniform() ? 1 : handle.size();
                     auto total = ResultT(handle.get(0));
-                    for (size_t i = 1; i < size; ++i) {
-                        OPENVDB_ASSERT(i < size_t(std::numeric_limits<Index>::max()));
-                        total += ResultT(handle.get(Index(i)));
+                    const size_t size = handle.size();
+                    if (handle.isUniform()) total *= size;
+                    else {
+                        for (size_t i = 1; i < size; ++i) {
+                            OPENVDB_ASSERT(i < size_t(std::numeric_limits<Index>::max()));
+                            total += ResultT(handle.get(Index(i)));
+                        }
                     }
                     values[leaf.pos()].reset(new ResultT(total));
                 }
