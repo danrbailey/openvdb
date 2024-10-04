@@ -106,7 +106,7 @@ jobs:
         key: linux-vfx${{ matrix.config.image }}-abi${{ matrix.config.abi }}-${{ matrix.config.cxx }}-${{ steps.timestamp.outputs.timestamp }}
         restore-keys: linux-vfx${{ matrix.config.image }}-abi${{ matrix.config.abi }}-${{ matrix.config.cxx }}-
     - name: validate
-      run: >
+      run: |
         find /usr/local/lib/cmake | grep glfw
         find /usr/local/lib64/cmake | grep glfw
     - name: build
