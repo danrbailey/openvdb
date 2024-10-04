@@ -112,6 +112,9 @@ endif()
 set(glfw3_FIND_VERSION ${MINIMUM_GLFW_VERSION})
 find_package(glfw3 ${MINIMUM_GLFW_VERSION} REQUIRED)
 
+message(STATUS "glfw3_VERSION: ${glfw3_VERSION}")
+message(STATUS "glfw3_DIR: ${glfw3_DIR}")
+
 # We only use find_package_handle_standard_args to verify and print
 # appropriate messages. This now explicitly errors in 3.19...
 # @todo Improve this entire GLFW3 search
