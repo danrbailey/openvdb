@@ -80,7 +80,7 @@ jobs:
           #  versions of the clang15.X containers have some issues with the GLFW
           #  installation
           - { cxx: clang++, image: '2024', abi: '11', build: 'Release', cmake: '' }
-          - { cxx: clang++, image: '2023', abi: '11', build: 'Release', cmake: '' }
+          - { cxx: clang++, image: '2023.0', abi: '11', build: 'Release', cmake: '' }
           - { cxx: clang++, image: '2022', abi: '10', build: 'Release', cmake: '-DDISABLE_DEPENDENCY_VERSION_CHECKS=ON' }
       fail-fast: false
     steps:
@@ -107,8 +107,8 @@ jobs:
         restore-keys: linux-vfx${{ matrix.config.image }}-abi${{ matrix.config.abi }}-${{ matrix.config.cxx }}-
     - name: validate
       run: >
-        find /usr/local/lib/cmake
-        find /usr/local/lib64/cmake
+        find /usr/local/lib/cmake | grep glfw
+        find /usr/local/lib64/cmake | grep glfw
     - name: build
       run: >
         ./ci/build.sh -v
