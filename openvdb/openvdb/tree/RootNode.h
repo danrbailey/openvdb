@@ -710,6 +710,11 @@ public:
     template<typename AccessorT>
     void addTileAndCache(Index level, const Coord& xyz, const ValueType&, bool state, AccessorT&);
 
+    /// @brief Delete any child or tile containing voxel (x, y, z) at the root level.
+    /// Do nothing if no child or tile was found.
+    /// @return @c true if child or tile was deleted
+    bool deleteChildOrTile(const Coord& xyz);
+
     /// @brief Return a pointer to the leaf node that contains voxel (x, y, z).
     /// If no such node exists, create one that preserves the values and
     /// active states of all voxels.
