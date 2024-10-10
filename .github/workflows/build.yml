@@ -165,6 +165,7 @@ jobs:
         vcpkg install python3
         vcpkg install jemalloc
         vcpkg install boost-iostreams
+        vcpkg install boost-interprocess
         vcpkg install pybind11
     - name: build
       run: >
