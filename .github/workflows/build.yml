@@ -152,7 +152,20 @@ jobs:
         echo "$Env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         echo "${{github.workspace}}\build\openvdb\openvdb\Release" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     - name: install
-      run: ./ci/install_windows.sh
+      shell: pwsh
+      run: |
+        vcpkg install zlib
+        vcpkg install libpng
+        vcpkg install openexr
+        vcpkg install tbb
+        vcpkg install gtest
+        vcpkg install blosc
+        vcpkg install glfw3
+        vcpkg install glew
+        vcpkg install python3
+        vcpkg install jemalloc
+        vcpkg install boost-iostreams
+        vcpkg install pybind11
     - name: build
       run: >
         ./ci/build.sh -v
