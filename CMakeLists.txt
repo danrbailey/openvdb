@@ -454,17 +454,8 @@ endif()
 # Locate Python and nanobind if necessary
 if(OPENVDB_BUILD_PYTHON_MODULE OR (OPENVDB_BUILD_NANOVDB AND NANOVDB_BUILD_PYTHON_MODULE))
 
-  # Configure Python and Numpy.
-  # To ensure consistent versions between components Interpreter, Compiler,
-  # Development and NumPy, specify all components at the same time when using
-  # FindPython.
-
-  # @note  explicitly only search for Development.Module from 3.18 as searching
-  #   Development.Embed can cause issues on linux systems where it doesn't exist
-  set(OPENVDB_PYTHON_REQUIRED_COMPONENTS Development Interpreter)
-
-  # Make sure find_package(Python) is only ever invoked once with all required components
-  find_package(Python 3.8 REQUIRED COMPONENTS ${OPENVDB_PYTHON_REQUIRED_COMPONENTS})
+  # Call find_package(Python ...)
+  find_package(Python 3.8 REQUIRED COMPONENTS Development Interpreter)
   find_package(nanobind REQUIRED)
 
   if(OPENVDB_FUTURE_DEPRECATION AND FUTURE_MINIMUM_PYTHON_VERSION)
