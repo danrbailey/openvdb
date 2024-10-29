@@ -21,6 +21,9 @@ vptr:tbb/task.h
 shift-base:TestMultiResGrid.cc
 shift-base:openvdb/math/Coord.h
 
+# Ignore a deadly signal in testTransformValues()
+deadly-signal:TestTools.cc
+
 ##### OpenVDB AX #####
 
 # Ignore overflows reported from old OpenSimplexNoise
