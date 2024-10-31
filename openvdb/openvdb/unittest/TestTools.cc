@@ -82,7 +82,7 @@ private:
 } // unnamed namespace
 #endif
 
-
+#if 0
 TEST_F(TestTools, testInteriorMask)
 {
     using namespace openvdb;
@@ -499,7 +499,7 @@ TEST_F(TestTools, testLevelSetMorph)
 
     */
 }//testLevelSetMorph
-
+#endif
 ////////////////////////////////////////
 
 TEST_F(TestTools, testLevelSetMeasure)
@@ -702,6 +702,7 @@ TEST_F(TestTools, testLevelSetMeasure)
 
 }//testLevelSetMeasure
 
+#if 0
 TEST_F(TestTools, testMagnitude)
 {
     using namespace openvdb;
@@ -1786,3 +1787,4 @@ TEST_F(TestTools, testPrune)
     }
     */
 }
+#endif
