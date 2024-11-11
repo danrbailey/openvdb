@@ -385,6 +385,13 @@ TEST_F(TestPointStatistics, testEvalAverage)
                 Vec3f(0.3f), Vec3f(1.0f,-0.5f,-0.2f),
                 Vec3f(0.2f), Vec3f(0.2f, 0.5f, 0.1f),
                 Vec3f(-0.1f), Vec3f(0.1f) }, "vectest")
+            .attribute<int32_t>({2,2,2,2,2,2,2,2}, "uniforminttest1")
+            .attribute<int32_t>({-10,-10,-10,-10,-10,-10,-10,-10}, "uniforminttest2") // all under 0
+            .attribute<float>({3.5f,3.5f,3.5f,3.5f,3.5f,3.5f,3.5f,3.5f}, "uniformfloattest")
+            .attribute<Vec3f>({ Vec3f(-4.0f), Vec3f(-4.0f),
+                Vec3f(-4.0f), Vec3f(-4.0f),
+                Vec3f(-4.0f), Vec3f(-4.0f),
+                Vec3f(-4.0f), Vec3f(-4.0f) }, "uniformvectest")
             .group({0,1,0,1,0,0,1,1}, "group1")
             .group({0,0,0,0,0,0,0,0}, "empty")
             .voxelsize(1.0)
@@ -433,6 +440,38 @@ TEST_F(TestPointStatistics, testEvalAverage)
             EXPECT_NEAR(0.0625, avg.y(), 1e-6);
             EXPECT_NEAR(0.05,   avg.z(), 1e-6);
         }
+
+        // Test average uniform attribute
+        // int32_t
+        {
+            ConvertElementType<int32_t, double>::Type avgi = 0;
+            bool success = points::evalAverage<int32_t>(points->tree(), "uniforminttest1", avgi);
+            EXPECT_TRUE(success);
+            EXPECT_EQ(2, avgi);
+
+            success = points::evalAverage<int32_t>(points->tree(), "uniforminttest2", avgi);
+            EXPECT_TRUE(success);
+            EXPECT_EQ(-10, avgi);
+        }
+
+        // float
+        {
+            ConvertElementType<float, double>::Type avg = 0;
+            bool success = points::evalAverage<float>(points->tree(), "uniformfloattest", avg);
+            EXPECT_TRUE(success);
+            EXPECT_NEAR(3.5, avg, 1e-6);
+        }
+
+        // Vec3f
+        {
+            ConvertElementType<Vec3f, double>::Type avg(0);
+            bool success = points::evalAverage<Vec3f>(points->tree(), "uniformvectest", avg);
+            EXPECT_TRUE(success);
+            EXPECT_NEAR(-4.0, avg.x(), 1e-6);
+            EXPECT_NEAR(-4.0, avg.y(), 1e-6);
+            EXPECT_NEAR(-4.0, avg.z(), 1e-6);
+        }
+
 
         // Test avg filter
 
@@ -605,6 +644,13 @@ TEST_F(TestPointStatistics, testAccumulate)
                 Vec3f(0.3f), Vec3f(1.0f,-0.5f,-0.2f),
                 Vec3f(0.2f), Vec3f(0.2f, 0.5f, 0.1f),
                 Vec3f(-0.1f), Vec3f(0.1f) }, "vectest")
+            .attribute<int32_t>({2,2,2,2,2,2,2,2}, "uniforminttest1")
+            .attribute<int32_t>({-10,-10,-10,-10,-10,-10,-10,-10}, "uniforminttest2") // all under 0
+            .attribute<float>({3.5f,3.5f,3.5f,3.5f,3.5f,3.5f,3.5f,3.5f}, "uniformfloattest")
+            .attribute<Vec3f>({ Vec3f(-4.0f), Vec3f(-4.0f),
+                Vec3f(-4.0f), Vec3f(-4.0f),
+                Vec3f(-4.0f), Vec3f(-4.0f),
+                Vec3f(-4.0f), Vec3f(-4.0f) }, "uniformvectest")
             .group({0,1,0,1,0,0,1,1}, "group1")
             .group({0,0,0,0,0,0,0,0}, "empty")
             .voxelsize(1.0)
@@ -664,6 +710,38 @@ TEST_F(TestPointStatistics, testAccumulate)
             EXPECT_NEAR(r.y(), total.y(), 1e-6);
             EXPECT_NEAR(r.z(), total.z(), 1e-6);
         }
+
+        // Test average uniform attribute
+        // int32_t
+        {
+            PromoteType<int32_t>::Highest total = 0;
+            bool success = points::accumulate<int32_t>(points->tree(), "uniforminttest1", total);
+            EXPECT_TRUE(success);
+            EXPECT_EQ(16, total);
+            total = 0;
+            success = points::accumulate<int32_t>(points->tree(), "uniforminttest2", total);
+            EXPECT_TRUE(success);
+            EXPECT_EQ(-80, total);
+        }
+
+        // float
+        {
+            PromoteType<float>::Highest total = 0;
+            bool success = points::accumulate<float>(points->tree(), "uniformfloattest", total);
+            EXPECT_TRUE(success);
+            EXPECT_NEAR(28.0, total, 1e-6);
+        }
+
+        // Vec3f
+        {
+            PromoteType<Vec3f>::Highest total(0);
+            bool success = points::accumulate<Vec3f>(points->tree(), "uniformvectest", total);
+            EXPECT_TRUE(success);
+            EXPECT_NEAR(-32, total.x(), 1e-6);
+            EXPECT_NEAR(-32, total.y(), 1e-6);
+            EXPECT_NEAR(-32, total.z(), 1e-6);
+        }
+
 
         // Test accumulate filter
 
