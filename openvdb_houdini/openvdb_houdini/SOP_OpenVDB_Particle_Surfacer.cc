@@ -154,7 +154,7 @@ newSopOperator(OP_OperatorTable* table)
                     " if no radius attribute is supplied this becomes the particle radius."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "rotationattribute", "Rotation Attribute")
-        .setDefault("orient")
+        .setDefault("rotation")
         .setTooltip("The point attribute representing the ellipsoid rotation, "
                     "this must be a 3x3 rotation matrix (mat3s) and is mandatory."));
 
