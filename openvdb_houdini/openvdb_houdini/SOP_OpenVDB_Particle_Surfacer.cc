@@ -409,6 +409,7 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
         const Real influenceScale = Real(evalFloat("influencescale", 0, time));
         const std::string radiusAttributeName = evalStdString("radiusattribute", time);
         const std::string vectorRadiusAttributeName = evalStdString("vectorradiusattribute", time);
+        const std::string rotationAttributeName = evalStdString("rotationattribute", time);
         const float radiusScale = evalFloat("radiusscale", 0, time);
         const openvdb::Vec3f vectorRadiusScale = evalVec3f("vectorradiusscale", time);
         const bool rebuild = static_cast<bool>(evalInt("rebuildlevelset", 0, time));
@@ -417,6 +418,9 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
         const int neighbourThreshold = evalInt("minneighbours", 0, time);
         const float dropletScale = evalFloat("dropletscale", 0, time);
         const float allowedStretch = evalFloat("allowedstretch", 0, time);
+        const std::string pointGroupStr = evalStdString("vdbpointsgroups", time);
+        std::vector<std::string> include, exclude;
+        points::AttributeSet::Descriptor::parseNames(include, exclude, pointGroupStr);
 
         std::vector<openvdb::points::PointDataGrid::ConstPtr> pointGrids;
         std::vector<GA_Offset> vdbPrimOffsets;
@@ -452,7 +456,14 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
             if (!radiusAttributeName.empty()) {
                 attributes[radiusAttributeName] = {0, false};
             }
-
+            if (mode == SurfaceType::Ellipsoids) {
+                if (!vectorRadiusAttributeName.empty()) {
+                    attributes[vectorRadiusAttributeName] = {0, false};
+                }
+                if (!rotationAttributeName.empty()) {
+                    attributes[rotationAttributeName] = {0, false};
+                }
+            }
             openvdb::points::PointDataGrid::Ptr houdiniPointsAsGridNonConst = hvdb::convertHoudiniToPointDataGrid(
                 *pointGeo, /*compression=*/0, attributes, *pointsTransform);
             openvdb::points::PointDataGrid::ConstPtr houdiniPointsAsGrid = openvdb::ConstPtrCast<
@@ -467,10 +478,6 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
 
             if (!iter) continue;
             if (boss.wasInterrupted()) break;
-
-            const std::string groupStr(evalStdString("vdbpointsgroups", time));
-            std::vector<std::string> include, exclude;
-            points::AttributeSet::Descriptor::parseNames(include, exclude, groupStr);
 
             openvdb::FloatGrid::Ptr output;
             const points::AttributeSet::Descriptor&
@@ -499,7 +506,6 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
                     throw std::runtime_error("Wrong attribute type for attribute " + vectorRadiusAttributeName + ", expected vec3s");
                 }
 
-                const std::string& rotationAttributeName = evalStdString("rotationattribute", time);
                 const size_t rotationIdx = descriptor.find(rotationAttributeName);
 
                 if (rotationIdx != openvdb::points::AttributeSet::INVALID_POS && descriptor.valueType(rotationIdx) !=
