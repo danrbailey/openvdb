@@ -1,5 +1,5 @@
 // Copyright Contributors to the OpenVDB Project
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 #include <openvdb_ax/compiler/Compiler.h>
 #include <openvdb_ax/compiler/VolumeExecutable.h>
@@ -12,6 +12,12 @@
 class TestVolumeExecutable : public CppUnit::TestCase
 {
 public:
+
+#if OPENVDB_ABI_VERSION_NUMBER >= 12
+    using LeafIndexType = openvdb::Index64;
+#else
+    using LeafIndexType = openvdb::Index32;
+#endif
 
     CPPUNIT_TEST_SUITE(TestVolumeExecutable);
     CPPUNIT_TEST(testConstructionDestruction);
@@ -163,7 +169,7 @@ TestVolumeExecutable::testTreeExecutionLevel()
     const openvdb::FloatTree copy = tree;
     // check config
     auto CHECK_CONFIG = [&]() {
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(1), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(1), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(3), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-4), tree.getValueDepth(openvdb::Coord(0)));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT2::DIM)));
@@ -365,7 +371,7 @@ TestVolumeExecutable::testActiveTileStreaming()
         CPPUNIT_ASSERT_EQUAL(openvdb::Index(openvdb::FloatTree::DEPTH-1), max);
         executable->execute(grid);
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(1), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(1), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(3), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-4), tree.getValueDepth(openvdb::Coord(0)));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT2::DIM)));
@@ -412,7 +418,7 @@ TestVolumeExecutable::testActiveTileStreaming()
             openvdb::Index64(NodeT1::NUM_VOXELS) +
             openvdb::Index64(NodeT0::NUM_VOXELS);
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(voxels / openvdb::FloatTree::LeafNodeType::NUM_VOXELS), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(voxels / openvdb::FloatTree::LeafNodeType::NUM_VOXELS), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(0), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-1), tree.getValueDepth(openvdb::Coord(0)));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-1), tree.getValueDepth(openvdb::Coord(NodeT1::DIM)));
@@ -471,7 +477,7 @@ TestVolumeExecutable::testActiveTileStreaming()
             ((n1ChildCount * (n2ChildAxisCount * n2ChildAxisCount)) - leafs) // NodeT1 face tiles (NodeT0) - leafs
             + 1 /*NodeT1*/ + 1 /*NodeT0*/;
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(leafs), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(leafs), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(tiles), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT2::DIM)));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-2), tree.getValueDepth(openvdb::Coord(NodeT2::DIM+NodeT1::DIM)));
@@ -520,7 +526,7 @@ TestVolumeExecutable::testActiveTileStreaming()
 
         executable->execute(grid);
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(0), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(0), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(5), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT1::DIM*0, 0, 0)));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT1::DIM*1, 0, 0)));
@@ -575,7 +581,7 @@ TestVolumeExecutable::testActiveTileStreaming()
             (n1ChildCount - leafs) // NodeT1 face tiles (NodeT0) - leafs
             + 3 /*NodeT1*/ + 1 /*NodeT0*/;
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(leafs), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(leafs), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(tiles), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(openvdb::BoolTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT1::DIM*1, 0, 0)));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::BoolTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT1::DIM*2, 0, 0)));
@@ -632,7 +638,7 @@ TestVolumeExecutable::testActiveTileStreaming()
             (n1ChildCount - leafs) // NodeT1 face tiles (NodeT0) - leafs
             + 3 /*NodeT1*/ + 1 /*NodeT0*/;
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(leafs), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(leafs), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(tiles), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(int(StringTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT1::DIM*1, 0, 0)));
         CPPUNIT_ASSERT_EQUAL(int(StringTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(NodeT1::DIM*2, 0, 0)));
@@ -676,7 +682,7 @@ TestVolumeExecutable::testActiveTileStreaming()
 
         executable->execute(grid);
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(1), tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(1), tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(2), tree.activeTileCount());
         CPPUNIT_ASSERT(tree.hasSameTopology(copy));
         CPPUNIT_ASSERT_EQUAL(int(openvdb::FloatTree::DEPTH-3), tree.getValueDepth(openvdb::Coord(0)));
@@ -723,7 +729,7 @@ TestVolumeExecutable::testActiveTileStreaming()
             openvdb::Index64(NodeT1::NUM_VOXELS) +
             openvdb::Index64(NodeT0::NUM_VOXELS);
 
-        CPPUNIT_ASSERT_EQUAL(openvdb::Index32(voxels / openvdb::FloatTree::LeafNodeType::NUM_VOXELS) + 1, tree.leafCount());
+        CPPUNIT_ASSERT_EQUAL(LeafIndexType(voxels / openvdb::FloatTree::LeafNodeType::NUM_VOXELS) + 1, tree.leafCount());
         CPPUNIT_ASSERT_EQUAL(openvdb::Index64(0), tree.activeTileCount());
         CPPUNIT_ASSERT_EQUAL(voxels, tree.activeVoxelCount());
         CPPUNIT_ASSERT_EQUAL(leaf, tree.probeLeaf(openvdb::Coord(NodeT1::DIM + NodeT0::DIM)));
