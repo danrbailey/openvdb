@@ -336,6 +336,9 @@ if(OPENVDB_BUILD_SOP_OpenVDB_AX)
   else()
     target_link_libraries(SOP_OpenVDB_AX PUBLIC openvdb_ax)
   endif()
+  # ILM: Downgrade compilation mode from -O3 to -O2 for OpenVDB AX SOP.
+  # This addresses a segfault at Houdini startup which has not yet been tracked down.
+  target_compile_options(SOP_OpenVDB_AX PRIVATE $<$<CONFIG:Release>:-O2>)
 endif()
 
 # These defines are in Platform.h when building against 8.1 and later
