@@ -352,6 +352,10 @@ if(OPENVDB_AX_SHARED)
   if(LLVM_PACKAGE_VERSION VERSION_GREATER_EQUAL 15.0.0)
     target_compile_options(openvdb_ax_shared PUBLIC "-Wno-error=deprecated-declarations")
   endif()
+
+  # ILM: Downgrade compilation mode from -O3 to -O2 for OpenVDB AX shared library.
+  # This addresses a segfault at Houdini startup which has not yet been tracked down.
+  target_compile_options(openvdb_ax_shared PRIVATE $<$<CONFIG:Release>:-O2>)
 endif()
 
 install(FILES ax.h Exceptions.h DESTINATION ${OPENVDB_INSTALL_INCLUDEDIR}/openvdb_ax/)
