@@ -89,7 +89,7 @@ public:
 
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
-    int isRefInput(unsigned i) const override { return (i > 0); }
+    int isRefInput(OutputIdx i) const override { return (i > 0); }
 
     class Cache: public SOP_VDBCacheOptions
     {

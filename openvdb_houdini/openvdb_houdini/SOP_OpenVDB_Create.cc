@@ -118,7 +118,7 @@ public:
 
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
-    int isRefInput(unsigned) const override { return true; }
+    int isRefInput(InputIdx) const override { return true; }
 
     int updateNearFar(float time);
     int updateFarPlane(float time);

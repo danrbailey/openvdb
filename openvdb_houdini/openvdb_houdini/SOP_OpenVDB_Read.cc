@@ -34,7 +34,7 @@ public:
     static void registerSop(OP_OperatorTable*);
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
-    int isRefInput(unsigned input) const override { return (input == 0); }
+    int isRefInput(OutputIdx input) const override { return (input == 0); }
 
 protected:
     OP_ERROR cookVDBSop(OP_Context&) override;

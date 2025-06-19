@@ -59,7 +59,7 @@ public:
 
     // Return true for a given input if the connector to the input
     // should be drawn dashed rather than solid.
-    int isRefInput(unsigned idx) const override { return (idx == 1); }
+    int isRefInput(OutputIdx idx) const override { return (idx == 1); }
 
 protected:
     bool updateParmsFlags() override;
