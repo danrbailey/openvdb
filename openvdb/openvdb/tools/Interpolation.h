@@ -528,6 +528,14 @@ public:
         const Vec3R world = mTargetXform->indexToWorld(ijk);
         return SamplerT::sample(*mSourceTree, mSourceXform->worldToIndex(world));
     }
+    /// @brief Return the value of the source grid at the index space position
+    /// ispoint relative to the target grid.
+    inline ValueType isSample(const Vec3d& ispoint) const
+    {
+        if (mAligned) return SamplerT::sample(*mSourceTree, ispoint);
+        const Vec3R world = mTargetXform->indexToWorld(ispoint);
+        return SamplerT::sample(*mSourceTree, mSourceXform->worldToIndex(world));
+    }
     /// @brief Return true if the two grids are aligned.
     inline bool isAligned() const { return mAligned; }
 private:
@@ -569,6 +577,15 @@ class DualGridSampler<tree::ValueAccessor<TreeT>, SamplerT>
         const Vec3R world = mTargetXform->indexToWorld(ijk);
         return SamplerT::sample(*mSourceAcc, mSourceXform->worldToIndex(world));
     }
+    /// @brief Return the value of the source grid at the index space position
+    /// ispoint relative to the target grid.
+    inline ValueType isSample(const Vec3d& ispoint) const
+    {
+        if (mAligned) return SamplerT::sample(*mSourceAcc, ispoint);
+        const Vec3R world = mTargetXform->indexToWorld(ispoint);
+        return SamplerT::sample(*mSourceAcc, mSourceXform->worldToIndex(world));
+    }
+
     /// @brief Return true if the two grids are aligned.
     inline bool isAligned() const { return mAligned; }
 private:
