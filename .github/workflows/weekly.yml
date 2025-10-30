@@ -168,6 +168,9 @@ jobs:
         ./ci/install_glfw.sh latest
         ./ci/install_imath.sh v3.2.2
         ./ci/install_exr.sh v3.2.2
+    - name: lib64symlink
+      if: contains(matrix.config.name, 'san')
+      run: ln -s /usr/local/lib/clang /usr/local/lib64/clang
     - name: build
       run: >
         ./ci/build.sh -v
