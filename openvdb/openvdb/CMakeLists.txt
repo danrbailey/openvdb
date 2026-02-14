@@ -178,6 +178,11 @@ else()
   )
 endif()
 
+if(USE_ZSTD)
+  # Find Zstd libraries
+  find_package(zstd ${ZSTD_MINIMUM_VERSION} REQUIRED)
+endif()
+
 if(USE_BLOSC OR USE_ZLIB)
   if(USE_STATIC_DEPENDENCIES)
     set(_ZLIB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
@@ -228,6 +233,10 @@ endif()
 
 if(USE_BLOSC)
   list(APPEND OPENVDB_CORE_DEPENDENT_LIBS Blosc::blosc)
+endif()
+
+if(USE_ZSTD)
+  list(APPEND OPENVDB_CORE_DEPENDENT_LIBS zstd::libzstd_shared)
 endif()
 
 if(USE_BLOSC OR USE_ZLIB)

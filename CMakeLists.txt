@@ -116,6 +116,10 @@ know it to be required.]=] ON)
 option(USE_ZLIB [=[
 Use zlib while building openvdb components. If OPENVDB_BUILD_CORE is OFF, CMake attempts to query the located
 openvdb build configuration to decide on zlib support. ZLib can only be disabled if Blosc is also disabled. ]=] ON)
+option(USE_ZSTD [=[
+Use Zstd while building openvdb components. If OPENVDB_BUILD_CORE is OFF, CMake attempts to query the located
+openvdb build configuration to decide on zstd support. You may set this to on to force zstd to be used if you
+know it to be required.]=] ON)
 option(USE_LOG4CPLUS [=[
 Use log4cplus while building openvdb components. If OPENVDB_BUILD_CORE is OFF, CMake attempts to query the
 located openvdb build configuration to decide on log4cplus support. You may set this to on to force log4cplus
