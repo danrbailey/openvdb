@@ -494,9 +494,13 @@ newSopOperator(OP_OperatorTable* table)
         parmlist.add(hutil::ParmFactory(PRM_SEPARATOR,"sepsettings", ""));
 
         parmlist.add(hutil::ParmFactory(PRM_FLT_J, "shutter", "Shutter")
-            .setDefault("1/$FPS")
-            .setRange(PRM_RANGE_UI, 0, PRM_RANGE_UI, 3)
-            .setTooltip("Scale the velocity blur length. This can also be seen as the shutter time."));
+            .setDefault("0.5 / ch('framespersecond')")
+            .setRange(PRM_RANGE_UI, 0, PRM_RANGE_UI, 1)
+            .setTooltip("Set the shutter time, multiply by frames per second to get shutter time in frames."));
+
+        parmlist.add(hutil::ParmFactory(PRM_FLT, "framespersecond", "Frames / Second")
+            .setDefault(1, "$FPS")
+            .setTooltip("Frames-per-second to use when computing blur timesamples in frames."));
 
         parmlist.add(hutil::ParmFactory(PRM_FLT_J, "shutteroffset", "Shutter Offset")
             .setDefault(PRMzeroDefaults)
@@ -724,10 +728,12 @@ SOP_OpenVDB_Motion_Blur_Camera::cookVDBSop(OP_Context& context)
                 OP_Context refContext = context;
 
                 const float frame = static_cast<float>(refContext.getFloatFrame());
-
+                const int fps = static_cast<int>(evalInt("framespersecond", 0, now));
                 for (const float timesample : blurParms.timesamples) {
                     // Sample the transform at the time relative to the current frame
-                    refContext.setFrame(frame + timesample);
+                    // note: we need to convert between time and float frame
+                    // i.e. timeoffset in frames = timeoffset * frames per second
+                    refContext.setFrame(frame + (timesample * fps));
 
                     if (inputs.lockInput(2, refContext) >= UT_ERROR_ABORT) return error();
                     const GU_Detail* cameraGeo = inputGeo(2);
