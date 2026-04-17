@@ -20,6 +20,8 @@
 #include <OP/OP_Operator.h>
 #include <OP/OP_OperatorTable.h>
 #include <PRM/PRM_Parm.h>
+#include <PRM/PRM_SpareData.h>
+#include <UT/UT_Ramp.h>
 
 #include <hboost/algorithm/string/classification.hpp> // is_any_of
 #include <hboost/algorithm/string/join.hpp>
@@ -842,6 +844,35 @@ newSopOperator(OP_OperatorTable* table)
             "is detected not to be continuous. In certain cases, it may be desirable to disable "
             "interpolation when using complex camera motion that is known to be continuous."));
 
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "enableshuttershape", "Enable Shutter Shape")
+        .setDefault(PRMzeroDefaults)
+        .setTooltip("Enable a transfer ramp that shapes density contributions across the "
+            "shutter interval during rasterization."));
+
+    {
+        std::map<std::string, std::string> rampSpare;
+        rampSpare[PRM_SpareData::getFloatRampDefaultToken()] =
+            "1pos ( 0.0 ) 1value ( 0.0 ) 1interp ( linear ) "
+            "2pos ( 1.0 ) 2value ( 1.0 ) 2interp ( linear )";
+
+        rampSpare[PRM_SpareData::getRampShowControlsDefaultToken()] = "0";
+
+        parms.add(hutil::ParmFactory(PRM_MULTITYPE_RAMP_FLT, "shuttershape", "Shutter Shape")
+            .setDefault(PRMtwoDefaults)
+            .setSpareData(rampSpare)
+            .setTooltip("Transfer ramp used to shape density contributions across the shutter "
+                "interval.\n"
+                "X axis: normalised position along the shutter interval.\n"
+                "Y axis: density multiplier."));
+    }
+
+    parms.add(hutil::ParmFactory(PRM_INT_J, "shuttershapesubsamples", "Shutter Shape Subsamples")
+        .setDefault(100)
+        .setRange(PRM_RANGE_RESTRICTED, 2, PRM_RANGE_UI, 1000)
+        .setTooltip("Number of uniform samples used to pre-bake the ramp before it is passed "
+            "down to the rasterizer. Higher values preserve sharper features at the cost of "
+            "a (tiny) increase in memory."));
+
     parms.endSwitcher();
 
     /////
@@ -912,6 +943,11 @@ SOP_OpenVDB_Rasterize_Frustum::updateParmsFlags()
     changed |= enableParm("contributionthreshold", pointsDensity);
 
     const bool enableMotionBlur = bool(evalInt("bakemotionblur", 0, 0));
+
+    const bool enableShutterShape = bool(evalInt("enableshuttershape", 0, 0));
+    changed |= enableParm("enableshuttershape", pointsDensity && enableMotionBlur);
+    changed |= enableParm("shuttershape", pointsDensity && enableMotionBlur && enableShutterShape);
+    changed |= enableParm("shuttershapesubsamples", pointsDensity && enableMotionBlur && enableShutterShape);
 
     const bool useRadius = bool(evalInt("enableradius", 0, 0));
     changed |= enableParm("radiusattribute", useRadius);
@@ -1064,6 +1100,35 @@ SOP_OpenVDB_Rasterize_Frustum::cookVDBSop(OP_Context& context)
             settings.velocityMotionBlur = bakeMotionBlur && 0 != evalInt("geometrymotionblur", 0, time);
             settings.framesPerSecond = static_cast<float>(evalFloat("framespersecond", 0, time));
             settings.motionSamples = std::max(2, static_cast<int>(evalInt("motionsamples", 0, time)));
+
+            // Density transfer ramp.
+            //
+            // The kernel in PointRasterizeFrustum is Houdini-free, so we sample
+            // the UT_Ramp into a plain std::vector<float> here and hand it down
+            // through FrustumRasterizerSettings. This mirrors the approach used
+            // by SOP_OpenVDB_Motion_Blur (ApproxRampWeightCache). The ramp is
+            // plumbed but not yet consumed by the rasterizer - see TODO inside
+            // openvdb/points/impl/PointRasterizeFrustumImpl.h.
+            const bool enableShutterShape = 0 != evalInt("enableshuttershape", 0, time);
+            if (enableShutterShape) {
+                UT_Ramp utRamp;
+                this->updateRampFromMultiParm(time, getParm("shuttershape"), utRamp);
+                // Force internal basis functions to be built before we read
+                // from the ramp; otherwise the first threaded consumer to call
+                // rampLookup could race with the lazy build.
+                utRamp.ensureRampIsBuilt();
+
+                const int subsamples = std::max(2,
+                    static_cast<int>(evalInt("shuttershapesubsamples", 0, time)));
+                auto samples = std::make_shared<std::vector<float>>(subsamples);
+                const float step = 1.0f / static_cast<float>(subsamples - 1);
+                for (int i = 0; i < subsamples; ++i) {
+                    float values[4] = { 0.0f };
+                    utRamp.rampLookup(i * step, values);
+                    (*samples)[i] = values[0];
+                }
+                settings.shutterShape.samples = std::move(samples);
+            }
 
             openvdb::points::FrustumRasterizerMask mask(*xform,
                 maskGrid ? maskGrid.get() : nullptr,

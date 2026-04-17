@@ -20,6 +20,10 @@
 #include "PointCount.h"
 #include "PointDataGrid.h"
 
+#include <cmath>
+#include <memory>
+#include <vector>
+
 namespace openvdb {
 OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
@@ -70,6 +74,48 @@ private:
 }; // class RasterCamera
 
 
+/// @brief Pre-sampled, Houdini-free representation of a transfer ramp/curve.
+///
+/// The rasterization kernels live in core OpenVDB and must not depend on
+/// Houdini types such as @c UT_Ramp. Callers (e.g. the Rasterize Frustum SOP)
+/// evaluate their ramp once into a flat buffer of uniform samples and pass
+/// the resulting @c RampSampleCache through @c FrustumRasterizerSettings.
+///
+/// The sample buffer is stored behind a @c shared_ptr so the cache is cheap
+/// to copy and safe to share across TBB tasks. An empty cache is treated as
+/// "no ramp" and is the default, ensuring existing call sites keep their
+/// original behaviour without any code changes.
+struct RampSampleCache
+{
+    /// Shared buffer of uniform ramp samples over the normalised range [0, 1].
+    /// The first element corresponds to @c pos=0 and the last to @c pos=1.
+    std::shared_ptr<const std::vector<float>> samples;
+
+    /// Return true if the cache contains one or more samples.
+    explicit operator bool() const
+    {
+        return samples && !samples->empty();
+    }
+
+    /// Evaluate the ramp at a normalised position in @c [0,1] using linear
+    /// interpolation between adjacent samples. Positions outside the range
+    /// are clamped. When the cache is empty a value of @c 1.0 is returned so
+    /// that callers can treat the ramp as an optional multiplicative factor.
+    float at(float pos) const
+    {
+        if (!samples || samples->empty())   return 1.0f;
+        const auto& s = *samples;
+        if (s.size() == 1)                  return s.front();
+        if (pos <= 0.0f)                    return s.front();
+        if (pos >= 1.0f)                    return s.back();
+        const float idx = pos * static_cast<float>(s.size() - 1);
+        const size_t i = static_cast<size_t>(std::floor(idx));
+        const float frac = idx - static_cast<float>(i);
+        return s[i] + frac * (s[i + 1] - s[i]);
+    }
+}; // struct RampSampleCache
+
+
 /// @brief A group of shared settings to be used in the Volume Rasterizer
 /// @param scaleByVoxelVolume   scale particle contributions by the volume of the receiving voxel
 /// @param velocityAttribute    the name of the velocity attribute
@@ -83,6 +129,9 @@ private:
 /// @param invertMask           if mask is provided, only rasterize if sample is inactive
 /// @param framesPerSecond      the global value for frames / second for computing motion blur
 /// @param threaded             if enabled, use threading to accelerate rasterization
+/// @param shutterShape         optional pre-sampled transfer ramp; when populated the
+///                             rasterizer will shape density contributions across the
+///                             shutter interval through it
 /// @note rasterization can clip can using any combination of bounding box, mask and frustum
 struct FrustumRasterizerSettings
 {
@@ -106,6 +155,12 @@ struct FrustumRasterizerSettings
     Name velocityAttribute = "v",
          radiusAttribute = "pscale";
     int motionSamples = 2;
+    // Optional ramp used to shape density contributions across the shutter
+    // interval. An empty cache (the default) leaves density untouched, so
+    // existing callers see no behavioural change. The DSO layer is
+    // responsible for populating this from a Houdini ramp before calling
+    // the rasterizer.
+    RampSampleCache shutterShape;
 }; // struct FrustumRasterizerSettings
 
 
