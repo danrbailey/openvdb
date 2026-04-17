@@ -232,12 +232,27 @@ struct RasterizeOp
 
     template <typename SphereOpT>
     static void rasterApproximateFrustumSphere(const Vec3d& position, const double scale,
-        const AttributeT& attributeScale, const float radiusWS,
+        const AttributeT& attributeScale, const float radiusValueWS,
         const math::Transform& frustum, const CoordBBox* clipBBox,
         util::NullInterrupter* interrupter, SphereOpT& op)
     {
         Vec3d voxelSize = frustum.voxelSize(position);
-        Vec3d radius = Vec3d(radiusWS)/voxelSize;
+
+        // Per-axis clamped WS radius: when the sphere is smaller than the voxel
+        // along an axis (very common in the Z direction of a frustum grid), the
+        // node-sampled kernel `1 - dist/radius` has no support at the bracketing
+        // voxel nodes and the splat collapses as the centre crosses half-integer
+        // positions, producing visible gaps. Inflating the kernel along any thin
+        // axis so it always reaches both bracketing nodes makes the contribution
+        // transition smoothly. Total deposited energy is preserved by scaling the
+        // per-voxel weight by the ratio of original to inflated kernel volumes.
+        Vec3d radiusWS = math::maxComponent(Vec3d(radiusValueWS), voxelSize);
+        double energyScale = scale;
+        if (radiusWS.product() > 0.0) {
+            energyScale *= Vec3d(radiusValueWS).product() / radiusWS.product();
+        }
+
+        const Vec3d radius = radiusWS / voxelSize;
         CoordBBox frustumBBox(Coord::floor(position-radius), Coord::ceil(position+radius));
 
         // if clipping to frustum is enabled, clip the index bounding box
@@ -267,9 +282,17 @@ struct RasterizeOp
 
                     Vec3d offset = (xyz - position) * voxelSize;
 
-                    double distanceSqr = offset.dot(offset);
+                    // Per-axis normalised distance squared. For axes where the
+                    // sphere is at least one voxel wide this matches the original
+                    // (offset / radiusWS)^2 sum; for thin axes the kernel reach
+                    // is the voxel size so adjacent layers always share contribution.
+                    const Vec3d normOffset = offset / radiusWS;
+                    const double normSqr = normOffset.dot(normOffset);
 
-                    op(outXYZ, scale, attributeScale, distanceSqr, radiusWS*radiusWS);
+                    // Pass normalised distance squared with unit radius squared so
+                    // the kernel `1 - sqrt(distSqr)/sqrt(radiusSqr)` evaluates to
+                    // `1 - sqrt(normSqr)`. Energy scaling preserves total weight.
+                    op(outXYZ, energyScale, attributeScale, normSqr, 1.0);
                 }
             }
         }
@@ -277,11 +300,26 @@ struct RasterizeOp
 
     template <typename SphereOpT>
     static void rasterFrustumSphere(const Vec3d& position, const double scale,
-        const AttributeT& attributeScale, const float radiusWS,
+        const AttributeT& attributeScale, const float radiusValueWS,
         const math::Transform& frustum, const CoordBBox* clipBBox,
         util::NullInterrupter* interrupter, SphereOpT& op)
     {
         const Vec3d positionWS = frustum.indexToWorld(position);
+
+        // Per-axis clamped WS radius: when the sphere is smaller than the voxel
+        // along an axis (very common in the Z direction of a frustum grid), the
+        // node-sampled kernel `1 - dist/radius` has no support at the bracketing
+        // voxel nodes and the splat collapses as the centre crosses half-integer
+        // positions, producing visible gaps. Inflating the kernel along any thin
+        // axis so it always reaches both bracketing nodes makes the contribution
+        // transition smoothly. Total deposited energy is preserved by scaling the
+        // per-voxel weight by the ratio of original to inflated kernel volumes.
+        Vec3d voxelSize = frustum.voxelSize(position);
+        Vec3d radiusWS = math::maxComponent(Vec3d(radiusValueWS), voxelSize);
+        double energyScale = scale;
+        if (radiusWS.product() > 0.0) {
+            energyScale *= Vec3d(radiusValueWS).product() / radiusWS.product();
+        }
 
         BBoxd inputBBoxWS(positionWS-radiusWS, positionWS+radiusWS);
         // Transform the corners of the input tree's bounding box
@@ -317,12 +355,17 @@ struct RasterizeOp
 
                     Vec3R xyzWS = frustum.indexToWorld(xyz);
 
-                    double xDist = xyzWS.x() - positionWS.x();
-                    double yDist = xyzWS.y() - positionWS.y();
-                    double zDist = xyzWS.z() - positionWS.z();
+                    // Per-axis normalised distance squared. For axes where the
+                    // sphere is at least one voxel wide this matches the original
+                    // (offset / radiusWS)^2 sum; for thin axes the kernel reach
+                    // is the voxel size so adjacent layers always share contribution.
+                    const Vec3d normOffset = (xyzWS - positionWS) / radiusWS;
+                    const double normSqr = normOffset.dot(normOffset);
 
-                    double distanceSqr = xDist*xDist+yDist*yDist+zDist*zDist;
-                    op(outXYZ, scale, attributeScale, distanceSqr, radiusWS*radiusWS);
+                    // Pass normalised distance squared with unit radius squared so
+                    // the kernel `1 - sqrt(distSqr)/sqrt(radiusSqr)` evaluates to
+                    // `1 - sqrt(normSqr)`. Energy scaling preserves total weight.
+                    op(outXYZ, energyScale, attributeScale, normSqr, 1.0);
                 }
             }
         }
