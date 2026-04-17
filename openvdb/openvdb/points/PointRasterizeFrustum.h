@@ -99,11 +99,13 @@ struct FrustumRasterizerSettings
          accurateFrustumRadius = false,
          accurateSphereMotionBlur = false,
          velocityMotionBlur = false,
+         accelerationMotionBlur = false,
          threaded = true;
     float threshold = 1e-6f,
           radiusScale = 1.0f,
           framesPerSecond = 24.0f;
     Name velocityAttribute = "v",
+         accelerationAttribute = "accel",
          radiusAttribute = "pscale";
     int motionSamples = 2;
 }; // struct FrustumRasterizerSettings
