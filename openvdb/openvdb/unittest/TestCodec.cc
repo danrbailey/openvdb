@@ -151,57 +151,91 @@ void testIOImpl(
     using namespace openvdb;
     using namespace openvdb::io;
 
+    const bool codecRegistered = CodecRegistry::isRegistered(GridT::gridType());
+    std::cerr << "[testIOImpl] gridName=" << gridName
+              << " gridType=" << GridT::gridType()
+              << " codecRegistered=" << codecRegistered << "\n";
+
     typename GridT::Ptr srcGrid = GridT::create(bgValue);
     srcGrid->setName(gridName);
     srcGrid->fill(CoordBBox(Coord(-5), Coord(5)), fillValue, true);
+    std::cerr << "[testIOImpl] srcGrid created: activeVoxelCount="
+              << srcGrid->activeVoxelCount()
+              << " leafCount=" << srcGrid->tree().leafCount() << "\n";
 
     std::stringstream ss("test");
-    if (CodecRegistry::isRegistered(GridT::gridType())) {
+    if (codecRegistered) {
         ss << "_codec";
     } else {
         ss << "_tree";
     }
     ss << "_" << GridT::gridType() << ".vdb";
     const std::string path = ss.str();
+    std::cerr << "[testIOImpl] writing to path=" << path << "\n";
     {
         io::File f(path);
         f.write(GridPtrVec{srcGrid});
     }
+    std::cerr << "[testIOImpl] write complete\n";
 
     typename GridT::Ptr readGrid;
     {
+        std::cerr << "[testIOImpl] opening for full read\n";
         io::File f(path);
         f.open();
         readGrid = gridPtrCast<GridT>(f.readGrid(gridName));
         f.close();
     }
+    std::cerr << "[testIOImpl] full read complete: readGrid="
+              << (readGrid ? "non-null" : "null") << "\n";
     ASSERT_TRUE(readGrid);
+    std::cerr << "[testIOImpl] checking topology match\n";
     EXPECT_TRUE(srcGrid->tree().hasSameTopology(readGrid->tree()));
     {
         auto readAcc = readGrid->getConstAccessor();
+        Index64 checkedVoxels = 0;
         for (typename GridT::ValueOnCIter it = srcGrid->cbeginValueOn(); it; ++it) {
             EXPECT_EQ(*it, readAcc.getValue(it.getCoord()));
+            ++checkedVoxels;
         }
+        std::cerr << "[testIOImpl] full read value check done: checkedVoxels="
+                  << checkedVoxels << "\n";
     }
 
     // clip read
     const BBoxd clipBBox(Vec3d(0.0), Vec3d(3.5));
+    std::cerr << "[testIOImpl] clipping srcGrid with bbox ["
+              << clipBBox.min() << ", " << clipBBox.max() << "]\n";
     auto srcClipped = tools::clip(*srcGrid, clipBBox);
+    std::cerr << "[testIOImpl] srcClipped: activeVoxelCount="
+              << srcClipped->activeVoxelCount()
+              << " leafCount=" << srcClipped->tree().leafCount() << "\n";
 
     typename GridT::Ptr readClipped;
     {
+        std::cerr << "[testIOImpl] opening for clip read\n";
         io::File f(path);
         f.open();
         readClipped = gridPtrCast<GridT>(f.readGrid(gridName, clipBBox));
         f.close();
     }
+    std::cerr << "[testIOImpl] clip read complete: readClipped="
+              << (readClipped ? "non-null" : "null") << "\n";
     ASSERT_TRUE(readClipped);
+    std::cerr << "[testIOImpl] readClipped: activeVoxelCount="
+              << readClipped->activeVoxelCount()
+              << " leafCount=" << readClipped->tree().leafCount() << "\n";
+    std::cerr << "[testIOImpl] checking clipped topology match\n";
     EXPECT_TRUE(srcClipped->tree().hasSameTopology(readClipped->tree()));
     {
         auto readAcc = readClipped->getConstAccessor();
+        Index64 checkedVoxels = 0;
         for (typename GridT::ValueOnCIter it = srcClipped->cbeginValueOn(); it; ++it) {
             EXPECT_EQ(*it, readAcc.getValue(it.getCoord()));
+            ++checkedVoxels;
         }
+        std::cerr << "[testIOImpl] clip read value check done: checkedVoxels="
+                  << checkedVoxels << "\n";
     }
 
     // topology-only read
@@ -210,6 +244,7 @@ void testIOImpl(
 
     typename GridT::Ptr readTopo;
     {
+        std::cerr << "[testIOImpl] opening for topology-only read\n";
         io::File f(path);
         f.open();
         GridBase::Ptr base;
@@ -217,13 +252,21 @@ void testIOImpl(
         readTopo = gridPtrCast<GridT>(base);
         f.close();
     }
+    std::cerr << "[testIOImpl] topology-only read complete: readTopo="
+              << (readTopo ? "non-null" : "null") << "\n";
     ASSERT_TRUE(readTopo);
+    std::cerr << "[testIOImpl] readTopo: activeVoxelCount="
+              << readTopo->activeVoxelCount()
+              << " leafCount=" << readTopo->tree().leafCount()
+              << " name=" << readTopo->getName() << "\n";
     EXPECT_EQ(readTopo->activeVoxelCount(), Index64(0));
     EXPECT_TRUE(readTopo->tree().leafCount() == 0);
     EXPECT_EQ(readTopo->getName(), gridName);
 
     // Cleanup
+    std::cerr << "[testIOImpl] cleanup: removing " << path << "\n";
     std::remove(path.c_str());
+    std::cerr << "[testIOImpl] done\n";
 }
 
 template <typename GridT>
