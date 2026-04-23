@@ -824,16 +824,16 @@ newSopOperator(OP_OperatorTable* table)
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "geometrymotionblur", "Geometry Motion Blur")
         .setDefault(PRMoneDefaults)
-        .setTooltip("Bake geometry motion blur as computed using point velocity."));
+        .setTooltip("Bake geometry motion blur using point velocity."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "velocityattribute", "Velocity Attribute")
         .setDefault("v")
         .setChoiceList(new PRM_ChoiceList(PRM_CHOICELIST_TOGGLE, populateVelocityMenu))
         .setTooltip("Velocity attribute to apply geometry motion blur (defaults to \"v\")."));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "accelerationmotionblur", "Acceleration Motion Blur")
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "usepointacceleration", "Use Point Acceleration")
         .setDefault(PRMzeroDefaults)
-        .setTooltip("Bake acceleration motion blur as computed using point acceleration."));
+        .setTooltip("Use point acceleration to compute motion blur."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "accelerationattribute", "Acceleration Attribute")
         .setDefault("accel")
@@ -943,8 +943,8 @@ SOP_OpenVDB_Rasterize_Frustum::updateParmsFlags()
     const bool geometryMotionBlur = enableMotionBlur && bool(evalInt("geometrymotionblur", 0, 0));
     changed |= enableParm("velocityattribute", geometryMotionBlur);
 
-    changed |= enableParm("accelerationmotionblur", enableMotionBlur);
-    const bool accelerationMotionBlur = enableMotionBlur && bool(evalInt("accelerationmotionblur", 0, 0));
+    changed |= enableParm("usepointacceleration", enableMotionBlur);
+    const bool accelerationMotionBlur = enableMotionBlur && bool(evalInt("usepointacceleration", 0, 0));
     changed |= enableParm("accelerationattribute", accelerationMotionBlur);
 
     const bool cameraMotionBlur = enableMotionBlur && bool(evalInt("cameramotionblur", 0, 0));
@@ -1077,7 +1077,7 @@ SOP_OpenVDB_Rasterize_Frustum::cookVDBSop(OP_Context& context)
             settings.accelerationAttribute = accelerationAttribute;
             settings.radiusAttribute = radiusAttribute;
             settings.velocityMotionBlur = bakeMotionBlur && 0 != evalInt("geometrymotionblur", 0, time);
-            settings.accelerationMotionBlur = bakeMotionBlur && 0 != evalInt("accelerationmotionblur", 0, time);
+            settings.accelerationMotionBlur = bakeMotionBlur && 0 != evalInt("usepointacceleration", 0, time);
             settings.framesPerSecond = static_cast<float>(evalFloat("framespersecond", 0, time));
             settings.motionSamples = std::max(2, static_cast<int>(evalInt("motionsamples", 0, time)));
 
