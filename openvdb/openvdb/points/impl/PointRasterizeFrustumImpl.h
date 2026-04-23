@@ -559,9 +559,7 @@ struct RasterizeOp
                 }
             }
 
-            // Acceleration motion blur: only apply when geometry motion blur is
-            // active and the point has a non-negligible velocity (matches the
-            // existing ray-tracing gate above).
+            // acceleration motion blur - only apply if velocity is non-zero
             openvdb::Vec3f acceleration(0.0f);
             const bool applyAcceleration = doRaytrace && accelerationHandle
                 && velocity.lengthSqr() >= openvdb::math::Delta<float>::value();
