@@ -294,6 +294,8 @@ isValidRange(float start, float end, float step)
 OP_ERROR
 SOP_OpenVDB_LOD::Cache::cookVDBSop(OP_Context& context)
 {
+    using SupportedGridTypes = hvdb::NumericGridTypes::Append<hvdb::Vec3GridTypes>;
+
     try {
         const fpreal time = context.getTime();
 
@@ -322,7 +324,10 @@ SOP_OpenVDB_LOD::Cache::cookVDBSop(OP_Context& context)
                     continue;
                 }
 
-                hvdb::GEOvdbApply<hvdb::NumericGridTypes>(**it, op);
+                if (!hvdb::GEOvdbApply<SupportedGridTypes>(**it, op)) {
+                    skipped.push_back(it->getGrid().getName());
+                    continue;
+                }
 
                 if (boss.wasInterrupted()) return error();
 
@@ -358,7 +363,10 @@ SOP_OpenVDB_LOD::Cache::cookVDBSop(OP_Context& context)
                     continue;
                 }
 
-                hvdb::GEOvdbApply<hvdb::NumericGridTypes>(**it, op);
+                if (!hvdb::GEOvdbApply<SupportedGridTypes>(**it, op)) {
+                    skipped.push_back(it->getGrid().getName());
+                    continue;
+                }
 
                 if (boss.wasInterrupted()) return error();
 
@@ -383,7 +391,10 @@ SOP_OpenVDB_LOD::Cache::cookVDBSop(OP_Context& context)
                     continue;
                 }
 
-                hvdb::GEOvdbApply<hvdb::NumericGridTypes>(**it, op);
+                if (!hvdb::GEOvdbApply<SupportedGridTypes>(**it, op)) {
+                    skipped.push_back(it->getGrid().getName());
+                    continue;
+                }
 
                 if (boss.wasInterrupted()) return error();
 
