@@ -412,6 +412,14 @@ struct RasterizeOp
         const float threshold = mSettings.threshold;
         const bool scaleByVoxelVolume = !useRadius && mSettings.scaleByVoxelVolume;
 
+        // Optional shutter shape ramp. Evaluated at the normalised
+        // arc-length position along each particle's motion-blurred
+        // rasterization path (0 = shutter start, 1 = shutter end) and applied
+        // as a multiplicative factor on the deposited density in
+        // doModifyVoxelOp via currentRampFactor (updated per deposit below).
+        const bool useShutterShape = static_cast<bool>(mSettings.shutterShape);
+        double currentRampFactor = 1.0;
+
         const float shutterStartDt = mSettings.camera.shutterStart()/mSettings.framesPerSecond;
         const float shutterEndDt = mSettings.camera.shutterEnd()/mSettings.framesPerSecond;
         const int motionSteps = std::max(1, mSettings.motionSamples-1);
@@ -477,6 +485,9 @@ struct RasterizeOp
                 ValueT newValue = MultiplyOp<ValueT>::mul(weightValue, attributeScale);
                 if (scaleByVoxelVolume) {
                     newValue /= static_cast<ValueT>(transform.voxelSize(ijk.asVec3d()).product());
+                }
+                if (useShutterShape && currentRampFactor != 1.0) {
+                    newValue = static_cast<ValueT>(newValue * currentRampFactor);
                 }
                 if (point_rasterize_internal::greaterThan(newValue, threshold)) {
                     if (isTemp) {
@@ -669,6 +680,8 @@ struct RasterizeOp
                     }
                 }
 
+                double accumulatedDistance = 0.0;
+
                 for (int motionStep = 0; motionStep < motionSteps; motionStep++) {
 
                     Vec3d startPosition = motionPositions[motionStep];
@@ -714,6 +727,15 @@ struct RasterizeOp
                         const Vec3d offset(direction / (steps-1));
 
                         for (int step = 0; step < steps; step++) {
+                            if (useShutterShape && totalDistance > 0.0) {
+                                const double segmentFraction = (steps > 1)
+                                    ? (step == (steps - 1) ? 1.0
+                                        : static_cast<double>(step) / double(steps - 1))
+                                    : 0.0;
+                                const double segmentDistance = segmentFraction * distance;
+                                const double t = (accumulatedDistance + segmentDistance) / totalDistance;
+                                currentRampFactor = mSettings.shutterShape.at(static_cast<float>(t));
+                            }
                             if (isFrustum) {
                                 if (mComputeMax) {
                                     if (mSettings.accurateFrustumRadius) {
@@ -769,6 +791,11 @@ struct RasterizeOp
                         while (true) {
                             const Coord& voxel = mDda.voxel();
                             double delta = (mDda.next() - mDda.time()) * distanceWeight;
+                            if (useShutterShape && totalDistance > 0.0) {
+                                const double voxelMidDistance = 0.5 * (mDda.time() + mDda.next());
+                                const double t = (accumulatedDistance + voxelMidDistance) / totalDistance;
+                                currentRampFactor = mSettings.shutterShape.at(static_cast<float>(t));
+                            }
                             if (forceSum) {
                                 this->rasterPoint(voxel, mScale * delta,
                                     attributeScale, sumVoxelOp);
@@ -780,6 +807,8 @@ struct RasterizeOp
                             if (!mDda.step())    break;
                         }
                     }
+
+                    accumulatedDistance += distance;
                 }
 
                 if (doRadius && !mComputeMax) {
