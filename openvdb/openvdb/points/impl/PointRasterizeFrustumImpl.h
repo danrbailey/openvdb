@@ -149,6 +149,7 @@ struct RasterizeOp
     using MaxOpT = tools::valxform::MaxOp<ValueT>;
     using PositionHandleT = openvdb::points::AttributeHandle<Vec3f>;
     using VelocityHandleT = openvdb::points::AttributeHandle<Vec3f>;
+    using AccelerationHandleT = openvdb::points::AttributeHandle<Vec3f>;
     using RadiusHandleT = openvdb::points::AttributeHandle<float>;
 
     // to prevent checking the interrupter too frequently, only check every 32 voxels cubed
@@ -159,6 +160,7 @@ struct RasterizeOp
                 const std::vector<Index64>& offsets,
                 const size_t attributeIndex,
                 const Name& velocityAttribute,
+                const Name& accelerationAttribute,
                 const Name& radiusAttribute,
                 CombinableT& combinable,
                 CombinableT* weightCombinable,
@@ -175,6 +177,7 @@ struct RasterizeOp
         , mOffsets(offsets)
         , mAttributeIndex(attributeIndex)
         , mVelocityAttribute(velocityAttribute)
+        , mAccelerationAttribute(accelerationAttribute)
         , mRadiusAttribute(radiusAttribute)
         , mCombinable(combinable)
         , mWeightCombinable(weightCombinable)
@@ -563,8 +566,14 @@ struct RasterizeOp
             }
         }
 
+        const bool useAcceleration =
+            mSettings.velocityMotionBlur && mSettings.accelerationMotionBlur;
+
         size_t positionIndex = leaf.attributeSet().find("P");
         size_t velocityIndex = leaf.attributeSet().find(mVelocityAttribute);
+        size_t accelerationIndex = useAcceleration
+            ? leaf.attributeSet().find(mAccelerationAttribute)
+            : points::AttributeSet::INVALID_POS;
         size_t radiusIndex = leaf.attributeSet().find(mRadiusAttribute);
 
         auto positionHandle = PositionHandleT::create(
@@ -572,6 +581,9 @@ struct RasterizeOp
         auto velocityHandle = (useRaytrace && leaf.hasAttribute(velocityIndex)) ?
             VelocityHandleT::create(leaf.constAttributeArray(velocityIndex)) :
             VelocityHandleT::Ptr();
+        auto accelerationHandle = (useAcceleration && leaf.hasAttribute(accelerationIndex)) ?
+            AccelerationHandleT::create(leaf.constAttributeArray(accelerationIndex)) :
+            AccelerationHandleT::Ptr();
         auto radiusHandle = (useRadius && leaf.hasAttribute(radiusIndex)) ?
             RadiusHandleT::create(leaf.constAttributeArray(radiusIndex)) :
             RadiusHandleT::Ptr();
@@ -619,6 +631,14 @@ struct RasterizeOp
                 }
             }
 
+            // acceleration motion blur - only apply if velocity is non-zero
+            openvdb::Vec3f acceleration(0.0f);
+            const bool applyAcceleration = doRaytrace && accelerationHandle
+                && velocity.lengthSqr() >= openvdb::math::Delta<float>::value();
+            if (applyAcceleration) {
+                acceleration = accelerationHandle->get(*iter);
+            }
+
             if (motionSteps > 1)    increment /= float(motionSteps);
 
             Vec3d position = positionHandle->get(*iter) + iter.getCoord().asVec3d();
@@ -632,6 +652,10 @@ struct RasterizeOp
                     float offset = motionStep == motionSteps ? shutterEndDt :
                         (shutterStartDt + increment * static_cast<float>(motionStep));
                     Vec3d samplePosition = position + velocity * offset;
+                    if (applyAcceleration) {
+                        samplePosition += 0.5 * Vec3d(acceleration) *
+                            double(offset) * double(offset);
+                    }
 
                     const math::Transform* sampleTransform = &transform;
                     if (!mSettings.camera.isStatic()) {
@@ -868,6 +892,7 @@ private:
     const std::vector<Index64>& mOffsets;
     const size_t mAttributeIndex;
     const Name mVelocityAttribute;
+    const Name mAccelerationAttribute;
     const Name mRadiusAttribute;
     CombinableT& mCombinable;
     CombinableT* mWeightCombinable;
@@ -992,11 +1017,15 @@ public:
 
         const auto& velocityAttribute = mSettings.velocityMotionBlur ?
             mSettings.velocityAttribute : "";
+        const auto& accelerationAttribute =
+            (mSettings.velocityMotionBlur && mSettings.accelerationMotionBlur) ?
+            mSettings.accelerationAttribute : "";
         const auto& radiusAttribute = mSettings.useRadius ?
             mSettings.radiusAttribute : "";
 
         bool isPositionAttribute = attribute == "P";
         bool isVelocityAttribute = attribute == mSettings.velocityAttribute;
+        bool isAccelerationAttribute = attribute == mSettings.accelerationAttribute;
         bool isRadiusAttribute = attribute == mSettings.radiusAttribute;
 
         // find the attribute index
@@ -1043,7 +1072,7 @@ public:
 
         // set streaming arbitrary attribute array flags
         if (mStream) {
-            if (attributeExists && !isPositionAttribute && !isVelocityAttribute && !isRadiusAttribute) {
+            if (attributeExists && !isPositionAttribute && !isVelocityAttribute && !isAccelerationAttribute && !isRadiusAttribute) {
                 leafManager.foreach(
                     [&](PointDataLeafT& leaf, size_t /*idx*/) {
                         leaf.attributeArray(attributeIndex).setStreaming(true);
@@ -1068,6 +1097,16 @@ public:
                         mSettings.threaded);
                     }
                 }
+                if (mSettings.velocityMotionBlur && mSettings.accelerationMotionBlur) {
+                    size_t accelerationIndex = attributeSet.find(accelerationAttribute);
+                    if (accelerationIndex != points::AttributeSet::INVALID_POS) {
+                        leafManager.foreach(
+                            [&](PointDataLeafT& leaf, size_t /*idx*/) {
+                                leaf.attributeArray(accelerationIndex).setStreaming(true);
+                            },
+                        mSettings.threaded);
+                    }
+                }
                 if (mSettings.useRadius) {
                     size_t radiusIndex = attributeSet.find(radiusAttribute);
                     if (radiusIndex != points::AttributeSet::INVALID_POS) {
@@ -1084,7 +1123,7 @@ public:
         const bool alignedTransform = *(mSettings.transform) == mGrid->constTransform();
 
         RasterizeOp<PointDataGridT, AttributeT, GridT, ResolvedFilterT> rasterizeOp(
-            *mGrid, mLeafOffsets, attributeIndex, velocityAttribute, radiusAttribute, combiner, weightCombiner,
+            *mGrid, mLeafOffsets, attributeIndex, velocityAttribute, accelerationAttribute, radiusAttribute, combiner, weightCombiner,
             dropBuffers, scale, resolvedFilter, computeMax, alignedTransform, mSettings.camera.isStatic(),
             mSettings, mMask, interrupter);
         leafManager.foreach(rasterizeOp, mSettings.threaded);
@@ -1362,6 +1401,14 @@ FrustumRasterizer<PointDataGridT>::FrustumRasterizer(const FrustumRasterizerSett
     if (mSettings.velocityAttribute.empty() && mSettings.velocityMotionBlur) {
         OPENVDB_THROW(ValueError,
             "Using velocity motion blur during rasterization requires a velocity attribute.");
+    }
+    if (mSettings.accelerationMotionBlur && !mSettings.velocityMotionBlur) {
+        OPENVDB_THROW(ValueError,
+            "Acceleration motion blur requires velocity motion blur to also be enabled.");
+    }
+    if (mSettings.accelerationMotionBlur && mSettings.accelerationAttribute.empty()) {
+        OPENVDB_THROW(ValueError,
+            "Using acceleration motion blur during rasterization requires an acceleration attribute.");
     }
 }
 

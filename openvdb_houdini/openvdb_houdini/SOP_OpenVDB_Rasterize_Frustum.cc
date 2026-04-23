@@ -826,12 +826,21 @@ newSopOperator(OP_OperatorTable* table)
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "geometrymotionblur", "Geometry Motion Blur")
         .setDefault(PRMoneDefaults)
-        .setTooltip("Bake geometry motion blur as computed using point velocity."));
+        .setTooltip("Bake geometry motion blur using point velocity."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "velocityattribute", "Velocity Attribute")
         .setDefault("v")
         .setChoiceList(new PRM_ChoiceList(PRM_CHOICELIST_TOGGLE, populateVelocityMenu))
         .setTooltip("Velocity attribute to apply geometry motion blur (defaults to \"v\")."));
+
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "usepointacceleration", "Use Point Acceleration")
+        .setDefault(PRMzeroDefaults)
+        .setTooltip("Use point acceleration to compute motion blur."));
+
+    parms.add(hutil::ParmFactory(PRM_STRING, "accelerationattribute", "Acceleration Attribute")
+        .setDefault("accel")
+        .setChoiceList(new PRM_ChoiceList(PRM_CHOICELIST_TOGGLE, populateVelocityMenu))
+        .setTooltip("Acceleration attribute to apply acceleration motion blur (defaults to \"accel\")."));
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "cameramotionblur", "Camera Motion Blur")
         .setDefault(PRMzeroDefaults)
@@ -970,6 +979,10 @@ SOP_OpenVDB_Rasterize_Frustum::updateParmsFlags()
     const bool geometryMotionBlur = enableMotionBlur && bool(evalInt("geometrymotionblur", 0, 0));
     changed |= enableParm("velocityattribute", geometryMotionBlur);
 
+    changed |= enableParm("usepointacceleration", enableMotionBlur);
+    const bool accelerationMotionBlur = enableMotionBlur && bool(evalInt("usepointacceleration", 0, 0));
+    changed |= enableParm("accelerationattribute", accelerationMotionBlur);
+
     const bool cameraMotionBlur = enableMotionBlur && bool(evalInt("cameramotionblur", 0, 0));
     changed |= enableParm("allowcameratransforminterpolation", cameraMotionBlur);
 
@@ -1085,6 +1098,7 @@ SOP_OpenVDB_Rasterize_Frustum::cookVDBSop(OP_Context& context)
             const bool bakeMotionBlur = 0 != evalInt("bakemotionblur", 0, time);
             const std::string densityAttribute = "density";
             const std::string velocityAttribute = evalStdString("velocityattribute", time);
+            const std::string accelerationAttribute = evalStdString("accelerationattribute", time);
             const std::string radiusAttribute = evalStdString("radiusattribute", time);
 
             openvdb::points::FrustumRasterizerSettings settings(*xform);
@@ -1096,8 +1110,10 @@ SOP_OpenVDB_Rasterize_Frustum::cookVDBSop(OP_Context& context)
             settings.accurateSphereMotionBlur = 0 != evalInt("accuratespheremotionblur", 0, time);
             settings.scaleByVoxelVolume = 0 != evalInt("scalebyvoxelvolume", 0, time);
             settings.velocityAttribute = velocityAttribute;
+            settings.accelerationAttribute = accelerationAttribute;
             settings.radiusAttribute = radiusAttribute;
             settings.velocityMotionBlur = bakeMotionBlur && 0 != evalInt("geometrymotionblur", 0, time);
+            settings.accelerationMotionBlur = bakeMotionBlur && 0 != evalInt("usepointacceleration", 0, time);
             settings.framesPerSecond = static_cast<float>(evalFloat("framespersecond", 0, time));
             settings.motionSamples = std::max(2, static_cast<int>(evalInt("motionsamples", 0, time)));
 
@@ -1160,6 +1176,9 @@ SOP_OpenVDB_Rasterize_Frustum::cookVDBSop(OP_Context& context)
                 attributes[densityAttribute] = {0, false};
                 if (!velocityAttribute.empty()) {
                     attributes[velocityAttribute] = {0, false};
+                }
+                if (!accelerationAttribute.empty()) {
+                    attributes[accelerationAttribute] = {0, false};
                 }
                 if (!radiusAttribute.empty()) {
                     attributes[radiusAttribute] = {0, false};
