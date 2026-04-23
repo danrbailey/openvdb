@@ -205,9 +205,27 @@ struct RasterizeOp
 
     template <typename SphereOpT>
     static void rasterVoxelSphere(const Vec3d& position, const double scale,
-        const AttributeT& attributeScale, const float radius, util::NullInterrupter* interrupter, SphereOpT& op)
+        const AttributeT& attributeScale, const float radiusValue, util::NullInterrupter* interrupter, SphereOpT& op)
     {
-        OPENVDB_ASSERT(radius > 0.0f);
+        OPENVDB_ASSERT(radiusValue > 0.0f);
+
+        // If the radius is smaller than one voxel, the linear kernel (1 - dist/radius)
+        // may not reach the nearest integer voxel coordinates on either side of the
+        // point. As the point moves, it suddenly snaps from influencing one set of
+        // voxels to another, causing visible gaps in the output. To avoid this, we
+        // clamp the radius to 1.0 so it always covers the two nearest voxel centres
+        // on each axis. To keep the total deposited energy the same, the per-voxel
+        // weight is scaled down by the ratio of the original kernel volume to the
+        // inflated one (radius^3). In practice, for cartesian rasterization, callers
+        // never reach this branch because the `radius < sqrt(3)` early-out above
+        // guarantees the radius is at least ~1.73 voxels.
+        double radius(radiusValue);
+        double energyScale = scale;
+        if (radius < 1.0) {
+            energyScale *= Vec3d(radius).product();
+            radius = 1.0;
+        }
+
         Coord ijk = Coord::round(position);
         int &i = ijk[0], &j = ijk[1], &k = ijk[2];
         const int imin=math::Floor(position[0]-radius), imax=math::Ceil(position[0]+radius);
@@ -216,15 +234,19 @@ struct RasterizeOp
 
         const bool interrupt = interrupter && (imax-imin)*(jmax-jmin)*(kmax-kmin) > interruptThreshold;
 
+        const double invRadius = 1.0 / radius;
         for (i = imin; i <= imax; ++i) {
             if (interrupt && interrupter->wasInterrupted()) break;
-            const auto x2 = math::Pow2(i - position[0]);
+            const double nx = (i - position[0]) * invRadius;
+            const double nx2 = nx * nx;
             for (j = jmin; j <= jmax; ++j) {
                 if (interrupt && interrupter->wasInterrupted()) break;
-                const auto x2y2 = math::Pow2(j - position[1]) + x2;
+                const double ny = (j - position[1]) * invRadius;
+                const double nx2ny2 = ny * ny + nx2;
                 for (k = kmin; k <= kmax; ++k) {
-                    const auto x2y2z2 = x2y2 + math::Pow2(k - position[2]);
-                    op(ijk, scale, attributeScale, x2y2z2, radius*radius);
+                    const double nz = (k - position[2]) * invRadius;
+                    const double normSqr = nx2ny2 + nz * nz;
+                    op(ijk, energyScale, attributeScale, normSqr);
                 }
             }
         }
@@ -232,12 +254,27 @@ struct RasterizeOp
 
     template <typename SphereOpT>
     static void rasterApproximateFrustumSphere(const Vec3d& position, const double scale,
-        const AttributeT& attributeScale, const float radiusWS,
+        const AttributeT& attributeScale, const float radiusValueWS,
         const math::Transform& frustum, const CoordBBox* clipBBox,
         util::NullInterrupter* interrupter, SphereOpT& op)
     {
         Vec3d voxelSize = frustum.voxelSize(position);
-        Vec3d radius = Vec3d(radiusWS)/voxelSize;
+
+        // Per-axis clamped WS radius: when the sphere is smaller than the voxel
+        // along an axis (very common in the Z direction of a frustum grid), the
+        // node-sampled kernel `1 - dist/radius` has no support at the bracketing
+        // voxel nodes and the splat collapses as the centre crosses half-integer
+        // positions, producing visible gaps. Inflating the kernel along any thin
+        // axis so it always reaches both bracketing nodes makes the contribution
+        // transition smoothly. Total deposited energy is preserved by scaling the
+        // per-voxel weight by the ratio of original to inflated kernel volumes.
+        Vec3d radiusWS = math::maxComponent(Vec3d(radiusValueWS), voxelSize);
+        double energyScale = scale;
+        if (radiusWS.product() > 0.0) {
+            energyScale *= Vec3d(radiusValueWS).product() / radiusWS.product();
+        }
+
+        const Vec3d radius = radiusWS / voxelSize;
         CoordBBox frustumBBox(Coord::floor(position-radius), Coord::ceil(position+radius));
 
         // if clipping to frustum is enabled, clip the index bounding box
@@ -267,9 +304,16 @@ struct RasterizeOp
 
                     Vec3d offset = (xyz - position) * voxelSize;
 
-                    double distanceSqr = offset.dot(offset);
+                    // Per-axis normalised distance squared. For axes where the
+                    // sphere is at least one voxel wide this matches the original
+                    // (offset / radiusWS)^2 sum; for thin axes the kernel reach
+                    // is the voxel size so adjacent layers always share contribution.
+                    const Vec3d normOffset = offset / radiusWS;
+                    const double normSqr = normOffset.dot(normOffset);
 
-                    op(outXYZ, scale, attributeScale, distanceSqr, radiusWS*radiusWS);
+                    // Op receives normalised distance squared; energy scaling
+                    // preserves total weight when the kernel was inflated.
+                    op(outXYZ, energyScale, attributeScale, normSqr);
                 }
             }
         }
@@ -277,11 +321,26 @@ struct RasterizeOp
 
     template <typename SphereOpT>
     static void rasterFrustumSphere(const Vec3d& position, const double scale,
-        const AttributeT& attributeScale, const float radiusWS,
+        const AttributeT& attributeScale, const float radiusValueWS,
         const math::Transform& frustum, const CoordBBox* clipBBox,
         util::NullInterrupter* interrupter, SphereOpT& op)
     {
         const Vec3d positionWS = frustum.indexToWorld(position);
+
+        // Per-axis clamped WS radius: when the sphere is smaller than the voxel
+        // along an axis (very common in the Z direction of a frustum grid), the
+        // node-sampled kernel `1 - dist/radius` has no support at the bracketing
+        // voxel nodes and the splat collapses as the centre crosses half-integer
+        // positions, producing visible gaps. Inflating the kernel along any thin
+        // axis so it always reaches both bracketing nodes makes the contribution
+        // transition smoothly. Total deposited energy is preserved by scaling the
+        // per-voxel weight by the ratio of original to inflated kernel volumes.
+        Vec3d voxelSize = frustum.voxelSize(position);
+        Vec3d radiusWS = math::maxComponent(Vec3d(radiusValueWS), voxelSize);
+        double energyScale = scale;
+        if (radiusWS.product() > 0.0) {
+            energyScale *= Vec3d(radiusValueWS).product() / radiusWS.product();
+        }
 
         BBoxd inputBBoxWS(positionWS-radiusWS, positionWS+radiusWS);
         // Transform the corners of the input tree's bounding box
@@ -317,12 +376,16 @@ struct RasterizeOp
 
                     Vec3R xyzWS = frustum.indexToWorld(xyz);
 
-                    double xDist = xyzWS.x() - positionWS.x();
-                    double yDist = xyzWS.y() - positionWS.y();
-                    double zDist = xyzWS.z() - positionWS.z();
+                    // Per-axis normalised distance squared. For axes where the
+                    // sphere is at least one voxel wide this matches the original
+                    // (offset / radiusWS)^2 sum; for thin axes the kernel reach
+                    // is the voxel size so adjacent layers always share contribution.
+                    const Vec3d normOffset = (xyzWS - positionWS) / radiusWS;
+                    const double normSqr = normOffset.dot(normOffset);
 
-                    double distanceSqr = xDist*xDist+yDist*yDist+zDist*zDist;
-                    op(outXYZ, scale, attributeScale, distanceSqr, radiusWS*radiusWS);
+                    // Op receives normalised distance squared; energy scaling
+                    // preserves total weight when the kernel was inflated.
+                    op(outXYZ, energyScale, attributeScale, normSqr);
                 }
             }
         }
@@ -449,33 +512,31 @@ struct RasterizeOp
 
         // sphere rasterization
 
-        // impl - modify a single voxel by coord based on distance from sphere origin
+        // impl - modify a single voxel by coord based on normalised distance from sphere origin
         auto doModifyVoxelByDistanceOp = [&](const Coord& ijk, const double scale, const AttributeT& attributeScale,
-            const double distanceSqr, const double radiusSqr, const bool isTemp)
+            const double normSqr, const bool isTemp)
         {
-            if (distanceSqr >= radiusSqr)   return;
+            if (normSqr >= 1.0)   return;
             if (isBool) {
                 valueAccessor.modifyValue(ijk, TrueOp(scale));
             } else {
-                double distance = std::sqrt(distanceSqr);
-                double radius = std::sqrt(radiusSqr);
-                double result = 1.0 - distance/radius;
-                doModifyVoxelOp(ijk, result * scale, attributeScale, isTemp, /*forceSum=*/false);
+                const double weight = 1.0 - std::sqrt(normSqr);
+                doModifyVoxelOp(ijk, weight * scale, attributeScale, isTemp, /*forceSum=*/false);
             }
         };
 
-        // modify a single voxel by coord based on distance from sphere origin, disable temporary trees
+        // modify a single voxel by coord based on normalised distance from sphere origin, disable temporary trees
         auto modifyVoxelByDistanceOp = [&](const Coord& ijk, const double scale, const AttributeT& attributeScale,
-            const double distanceSqr, const double radiusSqr)
+            const double normSqr)
         {
-            doModifyVoxelByDistanceOp(ijk, scale, attributeScale, distanceSqr, radiusSqr, /*isTemp=*/false);
+            doModifyVoxelByDistanceOp(ijk, scale, attributeScale, normSqr, /*isTemp=*/false);
         };
 
-        // modify a single voxel by coord based on distance from sphere origin, enable temporary trees
+        // modify a single voxel by coord based on normalised distance from sphere origin, enable temporary trees
         auto modifyTempVoxelByDistanceOp = [&](const Coord& ijk, const double scale, const AttributeT& attributeScale,
-            const double distanceSqr, const double radiusSqr)
+            const double normSqr)
         {
-            doModifyVoxelByDistanceOp(ijk, scale, attributeScale, distanceSqr, radiusSqr, /*isTemp=*/true);
+            doModifyVoxelByDistanceOp(ijk, scale, attributeScale, normSqr, /*isTemp=*/true);
         };
 
         typename points::AttributeHandle<AttributeT>::Ptr attributeHandle;
