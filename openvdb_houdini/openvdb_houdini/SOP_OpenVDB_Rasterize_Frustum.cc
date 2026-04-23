@@ -1103,19 +1103,15 @@ SOP_OpenVDB_Rasterize_Frustum::cookVDBSop(OP_Context& context)
 
             // Density transfer ramp.
             //
-            // The kernel in PointRasterizeFrustum is Houdini-free, so we sample
-            // the UT_Ramp into a plain std::vector<float> here and hand it down
-            // through FrustumRasterizerSettings. This mirrors the approach used
-            // by SOP_OpenVDB_Motion_Blur (ApproxRampWeightCache). The ramp is
-            // plumbed but not yet consumed by the rasterizer - see TODO inside
-            // openvdb/points/impl/PointRasterizeFrustumImpl.h.
+            // Density transfer ramp - the kernel in PointRasterizeFrustum is Houdini-free,
+            // so we sample the UT_Ramp into a plain std::vector<float> here and hand it down
+            // through FrustumRasterizerSettings to the kernel.
             const bool enableShutterShape = 0 != evalInt("enableshuttershape", 0, time);
             if (enableShutterShape) {
                 UT_Ramp utRamp;
                 this->updateRampFromMultiParm(time, getParm("shuttershape"), utRamp);
                 // Force internal basis functions to be built before we read
-                // from the ramp; otherwise the first threaded consumer to call
-                // rampLookup could race with the lazy build.
+                // from the ramp to prevent a race condition.
                 utRamp.ensureRampIsBuilt();
 
                 const int subsamples = std::max(2,
