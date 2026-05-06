@@ -55,7 +55,7 @@ public:
     static OP_Node* factory(OP_Network*, const char*, OP_Operator*);
 
     // The VDB port holds read-only VDBs.
-    int isRefInput(OutputIdx input) const override { return (input == 1); }
+    int isRefInput(unsigned input) const override { return (input == 1); }
 
     class Cache: public SOP_VDBCacheOptions { OP_ERROR cookVDBSop(OP_Context&) override; };
 };

@@ -134,7 +134,7 @@ public:
     static void registerSop(OP_OperatorTable*);
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
-    int isRefInput(OutputIdx input) const override { return (input == 1); }
+    int isRefInput(unsigned input) const override { return (input == 1); }
 
 protected:
     void resolveObsoleteParms(PRM_ParmList*) override;

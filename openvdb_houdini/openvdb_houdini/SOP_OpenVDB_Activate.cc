@@ -62,8 +62,8 @@ enum OPERATION_NAMES
 class SOP_VDBActivate : public hvdb::SOP_NodeVDB
 {
 public:
-    const char  *inputLabel(InputIdx idx) const override;
-    int          isRefInput(OutputIdx i) const override;
+    const char  *inputLabel(unsigned idx) const override;
+    int          isRefInput(unsigned i) const override;
 
     bool         updateParmsFlags() override;
 
@@ -1350,7 +1350,7 @@ SOP_VDBActivate::Cache::cookVDBSop(OP_Context &context)
 }
 
 const char *
-SOP_VDBActivate::inputLabel(OutputIdx index) const
+SOP_VDBActivate::inputLabel(unsigned index) const
 {
     switch (index)
     {
@@ -1363,7 +1363,7 @@ SOP_VDBActivate::inputLabel(OutputIdx index) const
 }
 
 int
-SOP_VDBActivate::isRefInput(OutputIdx i) const
+SOP_VDBActivate::isRefInput(unsigned i) const
 {
     switch (i)
     {

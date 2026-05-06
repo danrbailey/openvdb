@@ -2966,7 +2966,7 @@ struct SOP_OpenVDB_Rasterize_Points: public hvdb::SOP_NodeVDB
         return mCodeGenerator.hasShaderParameter(name);
     }
 
-    int isRefInput(OutputIdx i) const override { return i > 0; }
+    int isRefInput(unsigned i) const override { return i > 0; }
 
 protected:
     OP_ERROR cookVDBSop(OP_Context&) override;

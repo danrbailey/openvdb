@@ -44,7 +44,7 @@ public:
 
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
-    int isRefInput(OutputIdx i) const override { return (i == 1); }
+    int isRefInput(unsigned i) const override { return (i == 1); }
 
     class Cache: public SOP_VDBCacheOptions { OP_ERROR cookVDBSop(OP_Context&) override; };
 

@@ -55,7 +55,7 @@ public:
         return new SOP_OpenVDB_From_Particles(net, name, op);
     }
 
-    int isRefInput(OutputIdx i) const override { return (i > 0); }
+    int isRefInput(unsigned i) const override { return (i > 0); }
 
     int convertUnits();
 

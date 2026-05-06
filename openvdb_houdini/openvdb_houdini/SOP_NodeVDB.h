@@ -15,14 +15,6 @@
 #ifndef SESI_OPENVDB
 #include <UT/UT_DSOVersion.h>
 #endif
-#include <UT/UT_Version.h>
-#if UT_VERSION_INT < 0x15000000 // earlier than 21.0
-using InputIdx = unsigned;
-using OutputIdx = unsigned;
-#else
-using InputIdx = OP_InputIdx;
-using OutputIdx = OP_OutputIdx;
-#endif
 #include "SOP_VDBVerbUtils.h"
 #include <iosfwd>
 #include <string>
