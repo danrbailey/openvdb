@@ -80,23 +80,6 @@ public:
     template<typename OtherValueType>
     explicit LeafNode(const LeafNode<OtherValueType, Log2Dim>& other);
 
-    /// @brief Deprecated topology copy constructor
-    /// @note  This constructor initialises the bool buffer to the ValueMask
-    ///   states (i.e. value will be true if the active state is on and
-    ///   vice-versa). This is not really a "TopologyCopy" and is therefor
-    ///   deprecated. Use the explicit mask/buffer constructor instead:
-    /// @code
-    ///    // build new leaf node with the mask of 'a', but with the mask of
-    ///    // 'b' as the the new value buffer.
-    ///    const LeafNode a = ... ;
-    ///    const LeafNode b = ... ;
-    ///    const LeafNode copy(a.origin(), /*mask=*/a.getValueMask(),
-    ///      /*buff=*/b.getValueMask());
-    /// @endcode
-    template<typename ValueType>
-    OPENVDB_DEPRECATED_MESSAGE("Use LeafNodeBool component constructor.")
-    LeafNode(const LeafNode<ValueType, Log2Dim>& other, TopologyCopy);
-
     /// @brief Construct a LeafNodeBool with its individual components
     /// @param xyz  Leaf origin
     /// @param mask  The ValueMask to copy
@@ -436,7 +419,7 @@ public:
     /// it should not be converted to a non-const pointer!
     const bool& getLastValue() const { if (mValueMask.isOn(SIZE-1)) return Buffer::sOn; else return Buffer::sOff; }
 
-    /// Return @c true if all of this node's voxels have the same active state
+    /// @brief Return @c true if all of this node's voxels have the same active state
     /// and are equal to within the given tolerance, and return the value in
     /// @a constValue and the active state in @a state.
     bool isConstant(bool& constValue, bool& state, bool tolerance = 0) const;
@@ -788,6 +771,7 @@ private:
 
 ////////////////////////////////////////
 
+/// @cond OPENVDB_DOCS_INTERNAL
 
 template<Index Log2Dim>
 inline
@@ -863,17 +847,6 @@ LeafNode<bool, Log2Dim>::LeafNode(const LeafNode<ValueT, Log2Dim>& other,
 {
 }
 
-
-template<Index Log2Dim>
-template<typename ValueT>
-inline
-LeafNode<bool, Log2Dim>::LeafNode(const LeafNode<ValueT, Log2Dim>& other, TopologyCopy)
-    : mValueMask(other.valueMask())
-    , mBuffer(other.valueMask())// value = active state
-    , mOrigin(other.origin())
-    , mTransientData(other.mTransientData)
-{
-}
 
 template<Index Log2Dim>
 inline
@@ -1049,40 +1022,15 @@ template<Index Log2Dim>
 inline void
 LeafNode<bool, Log2Dim>::readBuffers(std::istream& is, bool /*fromHalf*/)
 {
+    io::checkFormatVersion(is);
+
     // Read in the value mask.
     mValueMask.load(is);
     // Read in the origin.
     is.read(reinterpret_cast<char*>(&mOrigin), sizeof(Coord::ValueType) * 3);
 
-    if (io::getFormatVersion(is) >= OPENVDB_FILE_VERSION_BOOL_LEAF_OPTIMIZATION) {
-        // Read in the mask for the voxel values.
-        mBuffer.mData.load(is);
-    } else {
-        // Older files stored one or more bool arrays.
-
-        // Read in the number of buffers, which should now always be one.
-        int8_t numBuffers = 0;
-        is.read(reinterpret_cast<char*>(&numBuffers), sizeof(int8_t));
-
-        // Read in the buffer.
-        // (Note: prior to the bool leaf optimization, buffers were always compressed.)
-        std::unique_ptr<bool[]> buf{new bool[SIZE]};
-        io::readData<bool>(is, buf.get(), SIZE, /*isCompressed=*/true);
-
-        // Transfer values to mBuffer.
-        mBuffer.mData.setOff();
-        for (Index i = 0; i < SIZE; ++i) {
-            if (buf[i]) mBuffer.mData.setOn(i);
-        }
-
-        if (numBuffers > 1) {
-            // Read in and discard auxiliary buffers that were created with
-            // earlier versions of the library.
-            for (int i = 1; i < numBuffers; ++i) {
-                io::readData<bool>(is, buf.get(), SIZE, /*isCompressed=*/true);
-            }
-        }
-    }
+    // Read in the mask for the voxel values.
+    mBuffer.mData.load(is);
 }
 
 
@@ -1121,7 +1069,6 @@ LeafNode<bool, Log2Dim>::operator!=(const LeafNode& other) const
 
 
 ////////////////////////////////////////
-
 
 template<Index Log2Dim>
 inline bool
@@ -1648,6 +1595,8 @@ LeafNode<bool, Log2Dim>::combine2(const LeafNode& b0, const OtherNodeT& b1, Comb
         mBuffer.mData.set(i, result);
     }
 }
+
+/// @endcond
 
 
 } // namespace tree

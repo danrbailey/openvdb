@@ -7,7 +7,7 @@
 
 #]=======================================================================]
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(NanoVDB LANGUAGES C CXX)
 
 include(GNUInstallDirs)
@@ -113,6 +113,20 @@ if(NANOVDB_USE_CUDA)
       get_target_property(VDB_MSVC_RUNTIME_SELECTION openvdb MSVC_RUNTIME_LIBRARY)
     endif()
   endif()
+
+  find_package(CUDAToolkit)
+
+
+  include(../../cmake/CPM.cmake)
+
+  # This will automatically clone CCCL from GitHub and make the exported cmake targets available
+  CPMAddPackage(
+      NAME CCCL
+      GITHUB_REPOSITORY nvidia/cccl
+      GIT_TAG main # Fetches the latest commit on the main branch
+  )
+
+  find_package(NCCL)
 endif()
 
 if(NANOVDB_USE_OPENVDB)
@@ -169,8 +183,13 @@ set(NANOVDB_INCLUDE_FILES
 # NanoVDB cuda header files
 set(NANOVDB_INCLUDE_CUDA_FILES
   cuda/DeviceBuffer.h
+  cuda/DeviceMesh.h
+  cuda/DeviceResource.h
+  cuda/DeviceStreamMap.h
   cuda/GridHandle.cuh
   cuda/NodeManager.cuh
+  cuda/TempPool.h
+  cuda/UnifiedBuffer.h
 )
 
 # NanoVDB io header files
@@ -198,6 +217,7 @@ set(NANOVDB_INCLUDE_TOOLS_FILES
   tools/GridStats.h
   tools/GridValidator.h
   tools/NanoToOpenVDB.h
+  tools/VoxelBlockManager.h
 )
 
 # NanoVDB tools/cuda header files
@@ -209,6 +229,14 @@ set(NANOVDB_INCLUDE_TOOLS_CUDA_FILES
   tools/cuda/IndexToGrid.cuh
   tools/cuda/PointsToGrid.cuh
   tools/cuda/SignedFloodFill.cuh
+  tools/cuda/MergeGrids.cuh
+  tools/cuda/TopologyBuilder.cuh
+  tools/cuda/RefineGrid.cuh
+  tools/cuda/PruneGrid.cuh
+  tools/cuda/DistributedPointsToGrid.cuh
+  tools/cuda/DilateGrid.cuh
+  tools/cuda/CoarsenGrid.cuh
+  tools/cuda/VoxelBlockManager.cuh
 )
 
 # NanoVDB util header files
@@ -237,6 +265,7 @@ set(NANOVDB_INCLUDE_UTIL_FILES
   util/Stencils.h
   util/Timer.h
   util/Util.h
+  util/MorphologyHelpers.h
 )
 
 # NanoVDB util/cuda header files
@@ -255,6 +284,10 @@ set(NANOVDB_INCLUDE_UTIL_CUDA_FILES
   util/cuda/CudaGridValidator.cuh
   util/cuda/CudaPointsToGrid.cuh
   util/cuda/GpuTimer.h
+  util/cuda/Morphology.cuh
+  util/cuda/MorphologyHelpers.cuh
+  util/cuda/DeviceGridTraits.cuh
+  util/cuda/Injection.cuh
 )
 
 add_library(nanovdb INTERFACE)
@@ -307,8 +340,12 @@ if(NANOVDB_USE_CUDA)
   endif()
 
   # Add CUDA includes to any C++ units which use NanoVDB
-  target_include_directories(nanovdb INTERFACE
-    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+  target_link_libraries(nanovdb INTERFACE CCCL::CCCL CUDA::cudart)
+
+  if(NCCL_FOUND)
+    target_compile_definitions(nanovdb INTERFACE -DNANOVDB_USE_NCCL)
+    target_link_libraries(nanovdb INTERFACE NCCL::NCCL)
+  endif()
 endif()
 
 if(NANOVDB_USE_MAGICAVOXEL)

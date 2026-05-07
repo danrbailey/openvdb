@@ -14,9 +14,11 @@
 #include <UT/UT_ErrorManager.h>
 #include <UT/UT_IOTable.h>
 #include <UT/UT_IStream.h>
+#include <UT/UT_OFStream.h>
 #include <UT/UT_Version.h>
 
 #include <FS/FS_IStreamDevice.h>
+#include <FS/FS_WriterStream.h>
 #include <GA/GA_Stat.h>
 #include <GU/GU_Detail.h>
 #include <SOP/SOP_Node.h>
@@ -316,6 +318,16 @@ GA_Detail::IOStatus
 GEO_VDBTranslator::fileSaveToFile(const GEO_Detail *geogdp, const char *fname)
 {
     HoudiniAppStats::ScopedTimer timer("GEO_VDBTranslator.fileSaveToFile");
+
+    // When HOUDINI_VDB_FORCE_STREAM_SAVE is enabled, force saving via a stream
+    // that will NOT save grid offsets, disabling the ability to partial
+    // reading on the saved files. This is for reported performance issues with
+    // Qumulo file systems, that apparently Isilon file systems do not suffer
+    // from.
+    if (UT_EnvControl::getInt(ENV_HOUDINI_VDB_FORCE_STREAM_SAVE)) {
+        FS_WriterStream os(fname);
+        return fileSaveVDB<openvdb::io::Stream, std::ostream &>(geogdp, *os.getStream());
+    }
 
     // Saving via io::File will save grid offsets that allow for partial
     // reading.

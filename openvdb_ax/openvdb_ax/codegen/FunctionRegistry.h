@@ -20,6 +20,12 @@
 
 #include <unordered_map>
 
+/// @cond OPENVDB_DOCS_INTERNAL
+namespace llvm {
+class LLVMContext;
+}
+/// @endcond
+
 namespace openvdb {
 OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
@@ -129,6 +135,22 @@ public:
 private:
     RegistryMap mMap;
 };
+
+namespace internal
+{
+
+OPENVDB_AX_API void
+InsertMappedFunctionRegistry(
+    llvm::LLVMContext* CPtr,
+    FunctionRegistry* reg,
+    const FunctionOptions& opts);
+
+OPENVDB_AX_API std::pair<FunctionRegistry*, FunctionOptions>
+GetMappedFunctionRegistry(llvm::LLVMContext* CPtr);
+
+OPENVDB_AX_API bool RemoveMappedFunctionRegistry(llvm::LLVMContext* CPtr);
+
+}
 
 } // namespace codegen
 } // namespace ax

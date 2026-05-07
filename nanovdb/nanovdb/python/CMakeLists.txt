@@ -1,3 +1,5 @@
+# Copyright Contributors to the OpenVDB Project
+# SPDX-License-Identifier: Apache-2.0
 option(NANOVDB_BUILD_PYTHON_UNITTESTS [=[
   "Include the NanoVDB Python unit test. Requires a python interpreter]=]
 ${NANOVDB_BUILD_UNITTESTS})
@@ -51,6 +53,7 @@ if(NANOVDB_BUILD_PYTHON_UNITTESTS)
     set(PYTHONPATH "$ENV{PYTHONPATH};${NANOVDB_PYTHON_WORKING_DIR}")
     string(REPLACE "\\;" ";" PYTHONPATH "${PYTHONPATH}")
     string(REPLACE ";" "\\;" PYTHONPATH "${PYTHONPATH}")
+    set_tests_properties(pytest_nanovdb PROPERTIES ENVIRONMENT "PYTHONPATH=${PYTHONPATH}")
   else()
     set_tests_properties(pytest_nanovdb PROPERTIES ENVIRONMENT "PYTHONPATH=$ENV{PYTHONPATH}:${NANOVDB_PYTHON_WORKING_DIR}")
   endif()

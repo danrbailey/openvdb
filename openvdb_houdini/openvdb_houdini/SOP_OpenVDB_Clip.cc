@@ -21,6 +21,7 @@
 #include <GEO/GEO_PrimVolume.h>
 #include <GU/GU_PrimVDB.h>
 #include <UT/UT_Matrix.h>
+#include <UT/UT_Version.h>
 #include <cmath> // for std::abs(), std::round()
 #include <exception>
 #include <string>
@@ -39,7 +40,11 @@ public:
 
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
-    int isRefInput(unsigned input) const override { return (input == 1); }
+    int isRefInput(OP_InputIdx input) const override
+    {
+        UT_ASSERT(input >= 0);
+        return (input == 1);
+    }
 
     class Cache: public SOP_VDBCacheOptions
     {
@@ -113,7 +118,7 @@ Mask VDB:\n\
 
     parms.add(hutil::ParmFactory(PRM_STRING, "camera", "Camera")
         .setTypeExtended(PRM_TYPE_DYNAMIC_PATH)
-        .setSpareData(&PRM_SpareData::objCameraPath)
+        .setSpareData(&PRM_SpareData::anyCameraPath)
         .setTooltip("Specify the path to a reference camera")
         .setDocumentation(
             "The path to the camera whose frustum is to be used as a clipping region"
@@ -458,39 +463,47 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
 
     // Fetch Camera
     UT_String cameraPath;
+    OBJ_CameraParms cameraParms;
     evalString(cameraPath, "camera", 0, time);
     if (!cameraPath.isstring()) {
         throw std::runtime_error{"no camera path was specified"};
     }
 
-    OBJ_Camera* camera = nullptr;
-    if (auto* obj = cookparms()->getCwd()->findOBJNode(cameraPath)) {
-        camera = obj->castToOBJCamera();
-    }
-    OP_Node* self = cookparms()->getCwd();
+    UT_Matrix4D      cameratosop;
+    OBJ_Node        *meobj = cookparms()->getNode()
+                        ? cookparms()->getNode()->getCreator()->castToOBJNode()
+                        : nullptr;
+    UT_StringHolder  errstr;
 
-    if (!camera) {
+    OP_Node::getCameraInfoAndRelativeTransform(
+        cameraPath,
+        meobj ? meobj->getFullPath() : UT_StringHolder::theEmptyString,
+        cookparms()->getCwd(),
+        false, // get_inverse_xform
+        context,
+        cookparms()->depnode(),
+        cameraParms,
+        cameratosop,
+        errstr);
+    if (errstr.isstring())
         throw std::runtime_error{"camera \"" + cameraPath.toStdString() + "\" was not found"};
-    }
-    self->addExtraInput(camera, OP_INTEREST_DATA);
-
-    // Fetch Camera Parms
-    OBJ_CameraParms cameraParms;
-    camera->getCameraParms(cameraParms, time);
 
     const bool pad = (0 != evalInt("setpadding", 0, time));
     const auto padding = pad ? evalVec3f("padding", time) : openvdb::Vec3f{0};
 
     const float nearPlane = (evalInt("setnear", 0, time)
         ? static_cast<float>(evalFloat("near", 0, time))
-        : static_cast<float>(camera->getNEAR(time))) - padding[2];
+        : static_cast<float>(cameraParms.mynear)) - padding[2];
     const float farPlane = (evalInt("setfar", 0, time)
         ? static_cast<float>(evalFloat("far", 0, time))
-        : static_cast<float>(camera->getFAR(time))) + padding[2];
+        : static_cast<float>(cameraParms.myfar)) + padding[2];
 
     OP_Node* thissop = cookparms()->getCwd();
     UT_Matrix4R camera_to_sop;
     OBJ_Node *meobj = thissop ? thissop->getCreator()->castToOBJNode() : 0;
+
+    mFrustum = hvdb::frustumTransformFromCamera(cameraParms, cameratosop,
+        /*offset=*/0.f, nearPlane, farPlane, /*voxelDepth=*/1.f, /*voxelCountX=*/100);
 
     if (meobj) {
         if (!camera->getRelativeTransform(*meobj, camera_to_sop, context)){

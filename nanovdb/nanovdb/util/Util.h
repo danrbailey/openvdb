@@ -34,6 +34,9 @@ typedef unsigned long long uint64_t;
 #else // !__CUDACC_RTC__
 
 #include <stdlib.h> //    for abs in clang7
+#if __cplusplus >= 202002L
+#include <atomic> //      for std::atomic_ref (C++20)
+#endif
 #include <stdint.h> //    for types like int32_t etc
 #include <stddef.h> //    for size_t type
 #include <cassert> //     for assert
@@ -83,6 +86,15 @@ typedef unsigned long long uint64_t;
 #endif
 
 #endif // if defined(__CUDACC__) || defined(__HIP__)
+
+// NANOVDB_RESTRICT: cross-compiler no-alias hint for pointer parameters.
+// GCC and Clang (including NVCC host compilation) spell it __restrict__,
+// MSVC spells it __restrict.
+#if defined(_MSC_VER)
+#define NANOVDB_RESTRICT __restrict
+#else
+#define NANOVDB_RESTRICT __restrict__
+#endif
 
 // The following macro will suppress annoying warnings when nvcc
 // compiles functions that call (host) intrinsics (which is perfectly valid)
@@ -154,7 +166,7 @@ __hostdev__ inline size_t strlen(const char *str)
 {
     NANOVDB_ASSERT(str != nullptr);
     const char *s = str;
-    while(*s) ++s;               ;
+    while(*s) ++s;
     return (s - str);
 }// util::strlen
 
@@ -322,11 +334,17 @@ struct is_same<T0, T1> {static constexpr bool value = false;};
 template<typename T>
 struct is_same<T, T> {static constexpr bool value = true;};
 
+template<typename T0, typename T1, typename ...T>
+static constexpr bool is_same_v = is_same<T0, T1, T...>::value;
+
 // --------------------------> util::is_floating_point <------------------------------------
 
 /// @brief C++11 implementation of std::is_floating_point
 template<typename T>
 struct is_floating_point {static constexpr bool value = is_same<T, float, double>::value;};
+
+template<typename T>
+static constexpr bool is_floating_point_v = is_floating_point<T>::value;
 
 // --------------------------> util::enable_if <------------------------------------
 
@@ -337,6 +355,9 @@ struct enable_if {};
 template <typename T>
 struct enable_if<true, T> {using type = T;};
 
+template<bool Test, typename T = void>
+using enable_if_t = typename enable_if<Test, T>::type;
+
 // --------------------------> util::disable_if <------------------------------------
 
 template<bool, typename T = void>
@@ -345,6 +366,9 @@ struct disable_if {using type = T;};
 template<typename T>
 struct disable_if<true, T> {};
 
+template<bool Test, typename T = void>
+using disable_if_t = typename disable_if<Test, T>::type;
+
 // --------------------------> util::is_const <------------------------------------
 
 template<typename T>
@@ -352,6 +376,9 @@ struct is_const {static constexpr bool value = false;};
 
 template<typename T>
 struct is_const<const T> {static constexpr bool value = true;};
+
+template<typename T>
+static constexpr bool is_const_v = is_const<T>::value;
 
 // --------------------------> util::is_pointer <------------------------------------
 
@@ -366,6 +393,9 @@ struct is_pointer {static constexpr bool value = false;};
 template<class T>
 struct is_pointer<T*> {static constexpr bool value = true;};
 
+template<typename T>
+static constexpr bool is_pointer_v = is_pointer<T>::value;
+
 // --------------------------> util::conditional <------------------------------------
 
 /// @brief C++11 implementation of std::conditional
@@ -377,6 +407,9 @@ struct conditional { using type = TrueT; };
 /// @tparam TrueT Type used when boolean is true
 template<class TrueT, class FalseT>
 struct conditional<false, TrueT, FalseT> { using type = FalseT; };
+
+template<bool Test, class TrueT, class FalseT>
+using conditional_t = typename conditional<Test, TrueT, FalseT>::type;
 
 // --------------------------> util::remove_const <------------------------------------
 
@@ -392,6 +425,9 @@ struct remove_const {using type = T;};
 template<typename T>
 struct remove_const<const T> {using type = T;};
 
+template<typename T>
+using remove_const_t = typename remove_const<T>::type;
+
 // --------------------------> util::remove_reference <------------------------------------
 
 /// @brief Trait use to remove reference, i.e. "&", qualifier from a type. Default implementation is just a pass-through
@@ -406,6 +442,9 @@ struct remove_reference {using type = T;};
 template <typename T>
 struct remove_reference<T&> {using type = T;};
 
+template <typename T>
+using remove_reference_t = typename remove_const<T>::type;
+
 // --------------------------> util::remove_pointer <------------------------------------
 
 /// @brief Trait use to remove pointer, i.e. "*", qualifier from a type. Default implementation is just a pass-through
@@ -419,6 +458,9 @@ struct remove_pointer {using type = T;};
 /// @details remove_pointer<float*>::type = float
 template <typename T>
 struct remove_pointer<T*> {using type = T;};
+
+template <typename T>
+using remove_pointer_t = typename remove_pointer<T>::type;
 
 // --------------------------> util::match_const <------------------------------------
 
@@ -438,6 +480,9 @@ struct match_const {using type = typename remove_const<T>::type;};
 template<typename T, typename ReferenceT>
 struct match_const<T, const ReferenceT> {using type = const typename remove_const<T>::type;};
 
+template<typename T, typename ReferenceT>
+using match_const_t = typename match_const<T, ReferenceT>::type;
+
 // --------------------------> util::is_specialization <------------------------------------
 
 /// @brief Metafunction used to determine if the first template
@@ -449,6 +494,7 @@ struct match_const<T, const ReferenceT> {using type = const typename remove_cons
 ///          is_specialization<std::vector<float>, std::vector>::value == true;
 template<typename AnyType, template<typename...> class TemplateType>
 struct is_specialization {static const bool value = false;};
+
 template<typename... Args, template<typename...> class TemplateType>
 struct is_specialization<TemplateType<Args...>, TemplateType>
 {
@@ -638,6 +684,54 @@ __hostdev__ inline uint32_t countOn(uint64_t v)
     return (((v + (v >> 4)) & uint64_t(0xF0F0F0F0F0F0F0F)) * uint64_t(0x101010101010101)) >> 56;
 #endif
 }// util::countOn(uint64_t)
+
+// ----------------------------> util::atomicOr <--------------------------------------
+
+/// @brief Atomically ORs @a mask into the 64-bit word at @a target (relaxed ordering).
+///        Returns the old value. Callable from both host and device code.
+NANOVDB_HOSTDEV_DISABLE_WARNING
+__hostdev__ inline uint64_t atomicOr(uint64_t* target, uint64_t mask)
+{
+#if defined(__CUDA_ARCH__) || defined(__HIP__)
+    return static_cast<uint64_t>(::atomicOr(reinterpret_cast<unsigned long long int*>(target),
+                                            static_cast<unsigned long long int>(mask)));
+#elif __cplusplus >= 202002L
+    return std::atomic_ref<uint64_t>(*target).fetch_or(mask, std::memory_order_relaxed);
+#elif defined(__GNUC__) || defined(__clang__)
+    return __atomic_fetch_or(target, mask, __ATOMIC_RELAXED);
+#elif defined(_MSC_VER)
+    static_assert(sizeof(long long) == sizeof(uint64_t), "Unexpected long long size");
+    return static_cast<uint64_t>(_InterlockedOr64(
+        reinterpret_cast<volatile long long*>(target),
+        static_cast<long long>(mask)));
+#else
+#error "util::atomicOr: no implementation for this compiler"
+#endif
+}// util::atomicOr(uint64_t*, uint64_t)
+
+// ----------------------------> util::atomicAnd <--------------------------------------
+
+/// @brief Atomically ANDs @a mask into the 64-bit word at @a target (relaxed ordering).
+///        Returns the old value. Callable from both host and device code.
+NANOVDB_HOSTDEV_DISABLE_WARNING
+__hostdev__ inline uint64_t atomicAnd(uint64_t* target, uint64_t mask)
+{
+#if defined(__CUDA_ARCH__) || defined(__HIP__)
+    return static_cast<uint64_t>(::atomicAnd(reinterpret_cast<unsigned long long int*>(target),
+                                             static_cast<unsigned long long int>(mask)));
+#elif __cplusplus >= 202002L
+    return std::atomic_ref<uint64_t>(*target).fetch_and(mask, std::memory_order_relaxed);
+#elif defined(__GNUC__) || defined(__clang__)
+    return __atomic_fetch_and(target, mask, __ATOMIC_RELAXED);
+#elif defined(_MSC_VER)
+    static_assert(sizeof(long long) == sizeof(uint64_t), "Unexpected long long size");
+    return static_cast<uint64_t>(_InterlockedAnd64(
+        reinterpret_cast<volatile long long*>(target),
+        static_cast<long long>(mask)));
+#else
+#error "util::atomicAnd: no implementation for this compiler"
+#endif
+}// util::atomicAnd(uint64_t*, uint64_t)
 
 }// namespace util ==================================================================
 

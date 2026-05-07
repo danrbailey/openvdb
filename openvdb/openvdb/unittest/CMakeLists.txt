@@ -7,7 +7,7 @@
 
 #]=======================================================================]
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(OpenVDBUnitTests LANGUAGES CXX)
 
 include(GNUInstallDirs)
@@ -68,7 +68,7 @@ set(UNITTEST_SOURCE_FILES
 
 if(OPENVDB_TESTS)
   foreach(test ${OPENVDB_TESTS})
-    file(GLOB UNITTEST_GLOB CONFIGURE_DEPENDS Test${test}*.cc)
+    file(GLOB UNITTEST_GLOB CONFIGURE_DEPENDS Test${test}.cc)
     list(APPEND UNITTEST_SOURCE_FILES
       ${UNITTEST_GLOB}
     )
@@ -120,8 +120,10 @@ else()
     TestLeafManager.cc
     TestLeafMask.cc
     TestLeafOrigin.cc
+    TestLevelSetDilatedMesh.cc
     TestLevelSetFilter.cc
     TestLevelSetRayIntersector.cc
+    TestLevelSetTubes.cc
     TestLevelSetUtil.cc
     TestLinearInterp.cc
     TestMaps.cc
@@ -141,6 +143,7 @@ else()
     TestNodeManager.cc
     TestNodeMask.cc
     TestNodeVisitor.cc
+    TestPCA.cc
     TestParticleAtlas.cc
     TestParticlesToLevelSet.cc
     TestPointAdvect.cc

@@ -1,3 +1,5 @@
+// Copyright Contributors to the OpenVDB Project
+// SPDX-License-Identifier: Apache-2.0
 #include <nanobind/nanobind.h>
 #include <nanobind/operators.h>
 #include <nanobind/stl/string.h>
@@ -294,10 +296,26 @@ bool isCudaAvailable()
 #endif
 }
 
+bool isGpuAvailable()
+{
+#ifdef NANOVDB_USE_CUDA
+    int deviceCount = 0;
+    cudaError_t err = cudaGetDeviceCount(&deviceCount);
+    if (err != cudaSuccess) {
+        cudaGetLastError();
+        return false;
+    }
+    return deviceCount > 0;
+#else
+    return false;
+#endif
+}
+
 NB_MODULE(nanovdb, m)
 {
     m.doc() = "Python module for NanoVDB";
     m.def("isCudaAvailable", &isCudaAvailable, "Returns whether or not the module was compiled with CUDA support");
+    m.def("isGpuAvailable", &isGpuAvailable, "Returns whether a CUDA-capable GPU is available at runtime");
 
     nb::enum_<GridType>(m, "GridType")
         .value("Unknown", GridType::Unknown)
@@ -321,8 +339,6 @@ NB_MODULE(nanovdb, m)
         .value("Vec4d", GridType::Vec4d)
         .value("Index", GridType::Index)
         .value("OnIndex", GridType::OnIndex)
-        .value("IndexMask", GridType::IndexMask)
-        .value("OnIndexMask", GridType::OnIndexMask)
         .value("PointIndex", GridType::PointIndex)
         .value("Vec3u8", GridType::Vec3u8)
         .value("Vec3u16", GridType::Vec3u16)

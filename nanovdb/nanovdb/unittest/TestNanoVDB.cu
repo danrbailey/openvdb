@@ -7,6 +7,7 @@
 #include <nanovdb/tools/GridBuilder.h>
 #include <nanovdb/tools/CreateNanoGrid.h>
 #include <nanovdb/tools/CreatePrimitives.h>
+#include <nanovdb/tools/VoxelBlockManager.h>
 #include <nanovdb/NodeManager.h>
 #include <nanovdb/util/cuda/Util.h>
 #include <nanovdb/tools/cuda/SignedFloodFill.cuh>
@@ -16,17 +17,30 @@
 #include <nanovdb/tools/cuda/GridChecksum.cuh>
 #include <nanovdb/tools/cuda/GridValidator.cuh>
 #include <nanovdb/tools/cuda/GridStats.cuh>
+#include <nanovdb/tools/cuda/DilateGrid.cuh>
+#include <nanovdb/tools/cuda/MergeGrids.cuh>
+#include <nanovdb/tools/cuda/PruneGrid.cuh>
+#include <nanovdb/tools/cuda/CoarsenGrid.cuh>
+#include <nanovdb/tools/cuda/RefineGrid.cuh>
+#include <nanovdb/util/cuda/Injection.cuh>
 #include <nanovdb/util/cuda/Timer.h>
 #include <nanovdb/util/Timer.h>
 #include <nanovdb/io/IO.h>
+#include <nanovdb/cuda/UnifiedBuffer.h>
+#include <nanovdb/cuda/DeviceStreamMap.h>
+#include <nanovdb/cuda/DeviceMesh.h>
 
+#include <cuda.h>
+#include <cuda_runtime_api.h>
 #include <gtest/gtest.h>
 #include <algorithm>// for std::sort
 #include <iomanip> // for std::setw, std::setfill
+#include <thread> // for std::thread
 
 namespace nanovdb {// this namespace is required by gtest
 
 namespace test {
+
 // used for testing cuda::DeviceBuffer
 void device2host(size_t count)
 {
@@ -37,7 +51,7 @@ void device2host(size_t count)
     EXPECT_TRUE(buffer.deviceData());
     float *d_array = reinterpret_cast<float*>(buffer.deviceData());
     constexpr unsigned int num_threads = 256;
-    unsigned int num_blocks = num_blocks = (static_cast<unsigned int>(count) + num_threads - 1) / num_threads;
+    unsigned int num_blocks = (static_cast<unsigned int>(count) + num_threads - 1) / num_threads;
     nanovdb::util::cuda::lambdaKernel<<<num_blocks, num_threads>>>(count, [=] __device__ (size_t i) {d_array[i] = float(i);});
     buffer.deviceDownload();// copy device -> host
     EXPECT_EQ(size, buffer.size());
@@ -46,6 +60,46 @@ void device2host(size_t count)
     float *array = reinterpret_cast<float*>(buffer.data());
     for (size_t i=0; i<count; ++i) EXPECT_EQ(array[i], float(i));
 }// device2host
+
+void host2device(size_t count)
+{
+    const size_t size = count * sizeof(float);
+    auto hostBuffer = nanovdb::HostBuffer(size);
+    for (size_t i=0; i<count; ++i) *hostBuffer.data<float>(i) = float(i);
+
+    int dev;
+    cudaError_t err = cudaGetDevice(&dev);
+    if (err != cudaSuccess) printf("kernel cuda error: %d\n", (int)err);
+
+    auto devBuffer = nanovdb::cuda::DeviceBuffer::create(hostBuffer, dev);// on device only
+    EXPECT_EQ(size, devBuffer.size());
+    EXPECT_FALSE(devBuffer.data());
+    EXPECT_TRUE(devBuffer.deviceData());
+    float *d_array = reinterpret_cast<float*>(devBuffer.deviceData());
+    constexpr unsigned int num_threads = 256;
+    unsigned int num_blocks = (static_cast<unsigned int>(count) + num_threads - 1) / num_threads;
+
+    bool *test, *d_test;
+    cudaCheck(cudaMallocHost((void**)&test, sizeof(bool)));
+    cudaCheck(cudaMalloc((void**)&d_test, sizeof(bool)));
+    *test = true;
+    cudaCheck(cudaMemcpyAsync(d_test, test, sizeof(bool), cudaMemcpyHostToDevice));// on host only
+
+    nanovdb::util::cuda::lambdaKernel<<<num_blocks, num_threads>>>(count, [=] __device__ (size_t i) {
+        if (d_array[i] != float(i)) *d_test = false;
+        d_array[i] = float(i) + 1.0f;
+    });
+    cudaCheck(cudaMemcpy(test, d_test, sizeof(bool), cudaMemcpyDeviceToHost));
+    EXPECT_TRUE(*test);
+    cudaCheck(cudaFreeHost(test));
+    cudaCheck(cudaFree(d_test));
+    devBuffer.deviceDownload();// copy device -> host
+    EXPECT_EQ(size, devBuffer.size());
+    EXPECT_TRUE(devBuffer.data());
+    EXPECT_TRUE(devBuffer.deviceData());
+    for (size_t i=0; i<count; ++i) EXPECT_EQ(*hostBuffer.data<float>(i) + 1.0f, *devBuffer.data<float>(i));
+}// host2device
+
 // used for testing cuda::DeviceBuffer
 void host2device2host(size_t count)
 {
@@ -68,7 +122,7 @@ void host2device2host(size_t count)
     EXPECT_TRUE(buffer.deviceData());
     float *d_array = reinterpret_cast<float*>(buffer.deviceData());
     constexpr unsigned int num_threads = 256;
-    unsigned int num_blocks = num_blocks = (static_cast<unsigned int>(count) + num_threads - 1) / num_threads;
+    unsigned int num_blocks = (static_cast<unsigned int>(count) + num_threads - 1) / num_threads;
     nanovdb::util::cuda::lambdaKernel<<<num_blocks, num_threads>>>(count, [=] __device__ (size_t i) {
         if (d_array[i] != float(i)) *d_test = false;
         d_array[i] = float(i) + 1.0f;
@@ -83,11 +137,13 @@ void host2device2host(size_t count)
     EXPECT_TRUE(buffer.deviceData());
     for (size_t i=0; i<count; ++i) EXPECT_EQ(array[i], float(i) + 1.0f);
 }// host2device2host
+
 // used to test cudaStr methods
 int signum(int val)
 {
     return (0 < val) - (val < 0);
 }// signum
+
 void cudaStr()
 {
     const size_t size = 50;
@@ -125,18 +181,155 @@ void cudaStr()
     cudaCheck(cudaFree(d_n));
     cudaCheck(cudaFree(d_str));
 }// cudaStr
+
 }// namespace test
+
 }// namespace nanovdb
 
 TEST(TestNanoVDBCUDA, CudaDeviceBuffer)
 {
-   nanovdb::test::device2host(1000);
-   nanovdb::test::host2device2host(1000);
+    {
+        nanovdb::cuda::DeviceBuffer buffer;
+        EXPECT_EQ(0, buffer.deviceCount());
+        EXPECT_EQ(0, buffer.bufferCount());
+        EXPECT_EQ(0, buffer.size());
+        EXPECT_TRUE(buffer.empty());
+    }
+    {
+        nanovdb::cuda::DeviceBuffer buffer(1024);
+        int count = 0;
+        cudaGetDeviceCount(&count);
+        EXPECT_EQ(count, buffer.deviceCount());
+        EXPECT_EQ(1, buffer.bufferCount());
+        EXPECT_EQ(1024, buffer.size());
+        EXPECT_FALSE(buffer.empty());
+    }
+    nanovdb::test::device2host(1000);
+    nanovdb::test::host2device(1000);
+    nanovdb::test::host2device2host(1000);
 }
 
 TEST(TestNanoVDBCUDA, CudaStr)
 {
    nanovdb::test::cudaStr();
+}
+
+__global__ void testKernel(int device)
+{
+    int dev;
+    cudaError_t err = cudaGetDevice(&dev);
+    //if (err != cudaSuccess) printf("kernel cuda error: %d\n", (int)err);
+    if (dev != device) printf("Error: expected device ID = %i but was called with %i\n", dev, device);
+}
+
+TEST(TestNanoVDBCUDA, DeviceStreamMap)
+{
+    using DevMap = nanovdb::cuda::DeviceStreamMap;
+    int count = 0, verbose = 0, current = 0;
+    {
+        cudaCheck(cudaGetDeviceCount(&count));
+        cudaCheck(cudaGetDevice(&current));
+        EXPECT_EQ(count,   nanovdb::util::cuda::deviceCount());
+        EXPECT_EQ(current, nanovdb::util::cuda::currentDevice());
+        float *ptr = new float;
+        const int deviceID = nanovdb::util::cuda::ptrToDevice(ptr);
+        EXPECT_TRUE(cudaInvalidDeviceId == deviceID || cudaCpuDeviceId == deviceID);
+        EXPECT_GT(0, deviceID);
+        //EXPECT_EQ(cudaInvalidDeviceId, deviceID);
+        //EXPECT_EQ(cudaCpuDeviceId, deviceID);
+        delete ptr;
+        cudaCheck(cudaMalloc((void**)&ptr, sizeof(float)));
+        EXPECT_EQ(current, nanovdb::util::cuda::ptrToDevice(ptr));
+        cudaCheck(cudaFree(ptr));
+    }
+    //std::cout << "Total device count = " << count << std::endl;
+    {
+        //std::cout << "Any:\n";
+        DevMap map(DevMap::Any, {}, verbose);
+        EXPECT_EQ(count, map.size());
+        for (const auto& [device, stream] : map) {
+            cudaSetDevice(device);
+            testKernel<<<1, 1, 0, stream>>>(device);
+            cudaStreamSynchronize(stream);
+        }
+    }
+    {
+        //std::cout << "Any excluding {current}:\n";
+        DevMap map(DevMap::Any, {current}, verbose);
+        EXPECT_EQ(count-1, map.size());
+        for (const auto& [device, stream] : map) {
+            cudaSetDevice(device);
+            testKernel<<<1, 1, 0, stream>>>(device);
+            cudaStreamSynchronize(stream);
+        }
+    }
+    {
+        //std::cout << "PeerToPeer:\n";
+        DevMap map(DevMap::PeerToPeer, {},  verbose);
+        EXPECT_GE(count, map.size());
+        for (const auto& [device, stream] : map) {
+            cudaSetDevice(device);
+            testKernel<<<1, 1, 0, stream>>>(device);
+            cudaStreamSynchronize(stream);
+        }
+    }
+    {
+        //std::cout << "Unified:\n";
+        DevMap map(DevMap::Unified, {}, verbose);
+        EXPECT_GE(count, map.size());
+        for (const auto& [device, stream] : map) {
+            cudaSetDevice(device);
+            testKernel<<<1, 1, 0, stream>>>(device);
+            cudaStreamSynchronize(stream);
+        }
+    }
+    cudaSetDevice(current); // restore device so subsequent tests don't fail
+}
+
+TEST(TestNanoVDBCUDA, DeviceMesh)
+{
+    int count = 0, current = 0;
+    {
+        cudaCheck(cudaGetDeviceCount(&count));
+        cudaCheck(cudaGetDevice(&current));
+        EXPECT_EQ(count,   nanovdb::util::cuda::deviceCount());
+        EXPECT_EQ(current, nanovdb::util::cuda::currentDevice());
+    }
+    //std::cout << "Total device count = " << count << std::endl;
+    nanovdb::cuda::DeviceMesh serialMesh;
+    EXPECT_EQ(count, serialMesh.deviceCount());
+    EXPECT_GT(nanovdb::cuda::minDevicePageSize(serialMesh), 0);
+    // Construction of deviceMesh (and destruction) should not modify current device
+    EXPECT_EQ(current, nanovdb::util::cuda::currentDevice());
+    // Serial kernel dispatch with iterator
+    for (const auto& [device, stream] : serialMesh) {
+        cudaSetDevice(device);
+        testKernel<<<1, 1, 0, stream>>>(device);
+    }
+    // Wait on each kernel to finish using indexing operation
+    for (size_t i = 0; i < serialMesh.deviceCount(); ++i) {
+        cudaSetDevice(serialMesh[i].id);
+        cudaStreamSynchronize(serialMesh[i].stream);
+    }
+
+    // Test move constructor
+    nanovdb::cuda::DeviceMesh parallelMesh(std::move(serialMesh));
+    EXPECT_EQ(count, parallelMesh.deviceCount());
+    // After move constructor, serialMesh should have no devices
+    EXPECT_EQ(0, serialMesh.deviceCount());
+    // Parallel kernel dispatch with iterator
+    std::vector<std::thread> threads;
+    for (const auto& [device, stream] : parallelMesh) {
+        threads.emplace_back([](int device, cudaStream_t stream) {
+            cudaSetDevice(device);
+            testKernel<<<1, 1, 0, stream>>>(device);
+            cudaStreamSynchronize(stream);
+        }, device, stream);
+    }
+    std::for_each(threads.begin(), threads.end(), [](std::thread& t) { t.join(); });
+    threads.clear();
+
+    cudaSetDevice(current); // Restore device so subsequent tests don't fail
 }
 
 TEST(TestNanoVDBCUDA, Basic_CudaPointsToGrid_float)
@@ -197,6 +390,8 @@ struct ProbeValueNew {
         ValueT value;
         operator bool() const { return state; }
     };
+    static constexpr int LEVEL = 0;// minimum level for the descent during top-down traversal
+    using Type = Probe;
     __hostdev__ static Probe get(const NanoRoot<BuildT>  &root) {
         return Probe{false, root.mBackground};
     }
@@ -213,24 +408,6 @@ struct ProbeValueNew {
         return Probe{leaf.isActive(n), leaf.getValue(n)};
     }
 };// ProbeValueNew<BuildT>
-
-template <typename BuildT>
-struct AccessLeafMask;
-
-// template specialization of AccessLeafMask wrt ValueOnIndexMask
-template <>
-struct AccessLeafMask<ValueOnIndexMask>{
-    __hostdev__ static bool get(const NanoRoot<ValueOnIndexMask>&) {return false;}
-    __hostdev__ static bool get(const typename NanoRoot<ValueOnIndexMask>::Tile&) {return false;}
-    __hostdev__ static bool get(const NanoUpper<ValueOnIndexMask>&, uint32_t) {return false;}
-    __hostdev__ static bool get(const NanoLower<ValueOnIndexMask>&, uint32_t) {return false;}
-    __hostdev__ static bool get(const NanoLeaf<ValueOnIndexMask> &leaf, uint32_t n) {return leaf.mMask.isOn(n);}
-    __hostdev__ static void set(NanoRoot<ValueOnIndexMask>&) {}
-    __hostdev__ static void set(typename NanoRoot<ValueOnIndexMask>::Tile&) {}
-    __hostdev__ static void set(NanoUpper<ValueOnIndexMask>&, uint32_t) {}
-    __hostdev__ static void set(NanoLower<ValueOnIndexMask>&, uint32_t) {}
-    __hostdev__ static void set(NanoLeaf<ValueOnIndexMask> &leaf, uint32_t n) {leaf.mMask.setOn(n);}
-};// AccessLeafMask<BuildT>
 
 }// end of test namespace
 }// end of nanovdb namespace
@@ -294,8 +471,15 @@ TEST(TestNanoVDBCUDA, Basic_CudaPointsToGrid_ValueIndex)
         const nanovdb::Coord ijk = coords[i];
         const auto *leaf = acc.get<nanovdb::GetLeaf<BuildT>>(ijk);
         EXPECT_TRUE(leaf);
+        EXPECT_EQ(0u, leaf->LEVEL);
         const auto offset = leaf->CoordToOffset(ijk);
         EXPECT_EQ(ijk, leaf->offsetToGlobalCoord(offset));
+        const auto *lower = acc.get<nanovdb::GetLower<BuildT>>(ijk);
+        EXPECT_TRUE(lower);
+        EXPECT_EQ(1u, lower->LEVEL);
+        const auto *upper = acc.get<nanovdb::GetUpper<BuildT>>(ijk);
+        EXPECT_TRUE(upper);
+        EXPECT_EQ(2u, upper->LEVEL);
     }
 }// Basic_CudaPointsToGrid_ValueIndex
 
@@ -304,7 +488,6 @@ TEST(TestNanoVDBCUDA, Basic_CudaPointsToGrid_ValueOnIndex)
     using BuildT = nanovdb::ValueOnIndex;
     using GridT = nanovdb::NanoGrid<BuildT>;
     EXPECT_TRUE(nanovdb::BuildTraits<BuildT>::is_index);
-    EXPECT_FALSE(nanovdb::BuildTraits<BuildT>::is_indexmask);
     EXPECT_TRUE(nanovdb::BuildTraits<BuildT>::is_onindex);
     EXPECT_FALSE(nanovdb::BuildTraits<BuildT>::is_offindex);
     const size_t num_points = 3;
@@ -397,121 +580,10 @@ TEST(TestNanoVDBCUDA, Basic_CudaPointsToGrid_ValueOnIndex)
     }
 }// Basic_CudaPointsToGrid_ValueOnIndex
 
-TEST(TestNanoVDBCUDA, Basic_CudaPointsToGrid_ValueOnIndexMask)
-{
-    using BuildT = nanovdb::ValueOnIndexMask;
-    using GridT = nanovdb::NanoGrid<BuildT>;
-    EXPECT_TRUE(nanovdb::BuildTraits<BuildT>::is_index);
-    EXPECT_TRUE(nanovdb::BuildTraits<BuildT>::is_indexmask);
-    EXPECT_TRUE(nanovdb::BuildTraits<BuildT>::is_onindex);
-    EXPECT_FALSE(nanovdb::BuildTraits<BuildT>::is_offindex);
-    const size_t num_points = 3;
-    nanovdb::Coord coords[num_points] = {nanovdb::Coord(1, 2, 3),
-                                         nanovdb::Coord(1, 2, 4),
-                                         nanovdb::Coord(8, 2, 3)}, *d_coords = nullptr;
-    cudaCheck(cudaMalloc(&d_coords, num_points * sizeof(nanovdb::Coord)));
-    cudaCheck(cudaMemcpy(d_coords, coords, num_points * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));// CPU -> GPU
-
-#if 0
-    nanovdb::tools::cuda::PointsToGrid converter;
-    auto handle = converter.getHandle<BuildT>(d_coords, num_points);
-#else
-    auto handle = nanovdb::tools::cuda::voxelsToGrid<BuildT>(d_coords, num_points);
-#endif
-
-    cudaCheck(cudaFree(d_coords));
-    EXPECT_TRUE(handle.deviceData());// grid only exists on the GPU
-    EXPECT_FALSE(handle.data());// no grid was yet allocated on the CPU
-
-    const uint64_t size = sizeof(GridT) +
-                          sizeof(GridT::TreeType) +
-                          GridT::RootType::memUsage(1) +
-                          sizeof(GridT::UpperNodeType) +
-                          sizeof(GridT::LowerNodeType) +
-                          2*sizeof(GridT::LeafNodeType);
-    EXPECT_EQ(handle.size(), size);
-
-    GridT *grid = handle.grid<BuildT>();// no grid on the CPU
-    EXPECT_FALSE(grid);
-    handle.deviceDownload();// creates a copy up the CPU
-    EXPECT_TRUE(handle.deviceData());
-    EXPECT_TRUE(handle.data());
-    auto *data = handle.gridData();
-    EXPECT_TRUE(data);
-    grid = handle.grid<BuildT>();
-    EXPECT_TRUE(grid);
-    EXPECT_EQ(4u, grid->valueCount());
-
-    auto acc = grid->getAccessor();
-    EXPECT_FALSE( acc.isActive(nanovdb::Coord(0,2,3)));
-    EXPECT_TRUE(  acc.isActive(nanovdb::Coord(1,2,3)));
-    EXPECT_TRUE(  acc.isActive(nanovdb::Coord(1,2,4)));
-    EXPECT_TRUE(  acc.isActive(nanovdb::Coord(8,2,3)));
-    EXPECT_EQ(0u, acc.getValue(nanovdb::Coord(0,2,3)));
-    EXPECT_EQ(1u, acc.getValue(nanovdb::Coord(1,2,3)));
-    EXPECT_EQ(2u, acc.getValue(nanovdb::Coord(1,2,4)));
-    EXPECT_EQ(3u, acc.getValue(nanovdb::Coord(8,2,3)));
-
-    using GetT = nanovdb::GetValue<BuildT>;
-    EXPECT_EQ(0u, acc.get<GetT>(nanovdb::Coord(0,2,3)));
-    EXPECT_EQ(1u, acc.get<GetT>(nanovdb::Coord(1,2,3)));
-    EXPECT_EQ(2u, acc.get<GetT>(nanovdb::Coord(1,2,4)));
-    EXPECT_EQ(3u, acc.get<GetT>(nanovdb::Coord(8,2,3)));
-
-    using OpT = nanovdb::test::AccessLeafMask<BuildT>;
-    EXPECT_EQ(false, acc.get<OpT>(nanovdb::Coord(0,2,3)));
-    EXPECT_EQ(true,  acc.get<OpT>(nanovdb::Coord(1,2,3)));
-    EXPECT_EQ(true,  acc.get<OpT>(nanovdb::Coord(1,2,4)));
-    EXPECT_EQ(true,  acc.get<OpT>(nanovdb::Coord(8,2,3)));
-
-    acc.set<OpT>(nanovdb::Coord(1,2,3));
-    acc.set<OpT>(nanovdb::Coord(8,2,3));
-
-    EXPECT_EQ(false, acc.get<OpT>(nanovdb::Coord(0,2,3)));
-    EXPECT_EQ(true , acc.get<OpT>(nanovdb::Coord(1,2,3)));
-    EXPECT_EQ(true,  acc.get<OpT>(nanovdb::Coord(1,2,4)));
-    EXPECT_EQ(true,  acc.get<OpT>(nanovdb::Coord(8,2,3)));
-
-    {
-        using T = nanovdb::ProbeValue<BuildT>;
-        uint64_t value = 0;
-        EXPECT_EQ(false, acc.get<T>(nanovdb::Coord(0,2,3), value) );
-        EXPECT_EQ(0u,    value);
-        EXPECT_EQ(true,  acc.get<T>(nanovdb::Coord(1,2,3), value) );
-        EXPECT_EQ(1u,    value);
-        EXPECT_EQ(true,  acc.get<T>(nanovdb::Coord(1,2,4), value) );
-        EXPECT_EQ(2u,    value);
-        EXPECT_EQ(true,  acc.get<T>(nanovdb::Coord(8,2,3), value) );
-        EXPECT_EQ(3u,    value);
-        EXPECT_EQ(false, acc.get<T>(nanovdb::Coord(-18,2,3), value) );
-        EXPECT_EQ(0u,    value);
-
-        EXPECT_EQ(false, grid->tree().get<T>(nanovdb::Coord(0,2,3), value) );
-        EXPECT_EQ(0u,    value);
-        EXPECT_EQ(true,  grid->tree().get<T>(nanovdb::Coord(1,2,3), value) );
-        EXPECT_EQ(1u,    value);
-        EXPECT_EQ(true,  grid->tree().get<T>(nanovdb::Coord(1,2,4), value) );
-        EXPECT_EQ(2u,    value);
-        EXPECT_EQ(true,  grid->tree().get<T>(nanovdb::Coord(8,2,3), value) );
-        EXPECT_EQ(3u,    value);
-        EXPECT_EQ(false, grid->tree().get<T>(nanovdb::Coord(-18,2,3), value) );
-        EXPECT_EQ(0u,    value);
-    }
-
-    for (size_t i=0; i<num_points; ++i)  {
-        const nanovdb::Coord ijk = coords[i];
-        const auto *leaf = acc.get<nanovdb::GetLeaf<BuildT>>(ijk);
-        EXPECT_TRUE(leaf);
-        const auto offset = leaf->CoordToOffset(ijk);
-        EXPECT_EQ(ijk, leaf->offsetToGlobalCoord(offset));
-        EXPECT_EQ(leaf->mValueMask, leaf->mMask);
-    }
-}// Basic_CudaPointsToGrid_ValueOnIndexMask
-
-TEST(TestNanoVDBCUDA, Large_CudaPointsToGrid_old)
+TEST(TestNanoVDBCUDA, Large_CudaPointsToGrid_DeviceBuffer)
 {
     using BuildT = nanovdb::ValueOnIndex;
-    //nanovdb::util::Timer timer;
+    nanovdb::util::Timer timer;
     const size_t voxelCount = 1 << 20;// 1048576
     std::vector<nanovdb::Coord> voxels;
     {//generate random voxels
@@ -545,9 +617,9 @@ TEST(TestNanoVDBCUDA, Large_CudaPointsToGrid_old)
     cudaCheck(cudaMemcpy(d_coords, voxels.data(), voxelSize, cudaMemcpyHostToDevice));
     //timer.stop();
 
-    //timer.start("Building grid on GPU from "+std::to_string(voxels.size())+" points");
+    timer.start("voxelsToGrid<DeviceBuffer>("+std::to_string(voxels.size())+" points)");
     auto handle = nanovdb::tools::cuda::voxelsToGrid<BuildT>(d_coords, voxelCount, 1.0);
-    //timer.stop();
+    timer.stop();
 
     EXPECT_TRUE(handle.deviceData());// grid only exists on the GPU
     EXPECT_TRUE(handle.deviceGrid<BuildT>());
@@ -585,7 +657,182 @@ TEST(TestNanoVDBCUDA, Large_CudaPointsToGrid_old)
     });
 
     //timer.stop();
-}// Large_CudaPointsToGrid_old
+    cudaCheck(cudaFree(d_coords));
+}// Large_CudaPointsToGrid_DeviceBuffer
+
+TEST(TestNanoVDBCUDA, Large_CudaPointsToGrid_UnifiedBuffer)
+{
+    using BuildT = nanovdb::ValueOnIndex;
+    nanovdb::util::Timer timer;
+    const size_t voxelCount = 1 << 20;// 1048576
+    std::vector<nanovdb::Coord> voxels;
+    {//generate random voxels
+        voxels.reserve(voxelCount);
+        std::srand(98765);
+        const int max = 512, min = -max;
+        auto op = [&](){return rand() % (max - min) + min;};
+        //timer.start("Creating "+std::to_string(voxelCount)+" random voxels on the CPU");
+        while (voxels.size() < voxelCount) voxels.push_back(nanovdb::Coord(op(), op(), op()));
+        //timer.stop();
+        EXPECT_EQ(voxelCount, voxels.size());
+    }
+#if 0
+    {// Build grid on CPU
+        nanovdb::tools::build::Grid<float> buildGrid(0.0f);
+        //timer.start("Building grid on CPU from "+std::to_string(voxels.size())+" points");
+        nanovdb::util::forEach0, voxelCount, voxelCount >> 6, [&](const nanovdb::util::Range1D &r){
+            auto acc = buildGrid.getWriteAccessor();
+            for (size_t i=r.begin(); i!=r.end(); ++i) acc.setValueOn(voxels[i]);
+        });
+        //timer.restart("Converting CPU build::Grid to nanovdb");
+        auto handle = nanovdb::tools::createNanoGrid(buildGrid);
+        //timer.stop();
+    }
+#endif
+    nanovdb::Coord* d_coords;
+    const size_t voxelSize = voxels.size() * sizeof(nanovdb::Coord);
+    //timer.start("Allocating "+std::to_string(voxelSize >> 20)+" MB on the GPU");
+    cudaCheck(cudaMalloc(&d_coords, voxelSize));
+    //timer.restart("Copying voxels from CPU to GPU");
+    cudaCheck(cudaMemcpy(d_coords, voxels.data(), voxelSize, cudaMemcpyHostToDevice));
+    //timer.stop();
+
+    timer.start("voxelsToGrid<UnifiedBuffer>("+std::to_string(voxels.size())+" points)");
+    auto handle = nanovdb::tools::cuda::voxelsToGrid<BuildT, nanovdb::Coord*, nanovdb::cuda::UnifiedBuffer>(d_coords, voxelCount, 1.0);
+    timer.stop();
+
+    EXPECT_TRUE(handle.deviceData());// grid exists on the GPU
+    EXPECT_TRUE(handle.deviceGrid<BuildT>());
+    EXPECT_FALSE(handle.deviceGrid<int>(0));
+    EXPECT_TRUE(handle.deviceGrid<BuildT>(0));
+    EXPECT_FALSE(handle.deviceGrid<BuildT>(1));
+    EXPECT_TRUE(handle.data());// grid also exists on the CPU
+
+    //timer.start("Allocating and copying grid from GPU to CPU");
+    auto *grid = handle.grid<BuildT>();// grid also exists on the CPU
+    EXPECT_TRUE(grid);
+    handle.deviceDownload();// creates a copy on the CPU
+    EXPECT_TRUE(handle.deviceData());
+    EXPECT_TRUE(handle.data());
+    auto *data = handle.gridData();
+    EXPECT_TRUE(data);
+    grid = handle.grid<BuildT>();
+    EXPECT_TRUE(grid);
+    EXPECT_TRUE(grid->valueCount()>0);
+    EXPECT_EQ(nanovdb::Vec3d(1.0), grid->voxelSize());
+
+    //timer.restart("Parallel unit-testing on CPU");
+    nanovdb::util::forEach(voxels,[&](const nanovdb::util::Range1D &r){
+        auto acc = grid->getAccessor();
+        for (size_t i=r.begin(); i!=r.end(); ++i) {
+            const nanovdb::Coord &ijk = voxels[i];
+            EXPECT_TRUE(acc.probeLeaf(ijk)!=nullptr);
+            EXPECT_TRUE(acc.isActive(ijk));
+            EXPECT_TRUE(acc.getValue(ijk) > 0u);
+            const auto *leaf = acc.get<nanovdb::GetLeaf<BuildT>>(ijk);
+            EXPECT_TRUE(leaf);
+            const auto offset = leaf->CoordToOffset(ijk);
+            EXPECT_EQ(ijk, leaf->offsetToGlobalCoord(offset));
+        }
+    });
+
+    //timer.stop();
+    cudaCheck(cudaFree(d_coords));
+}// Large_CudaPointsToGrid_UnifiedBuffer
+
+/// @brief Exercises the serial per-tile sort path (< 32 tiles) in PointsToGrid.
+///        Coordinates in [-512, 512] produce at most 2^3 = 8 upper internal node tiles
+///        (each upper node covers 4096 voxels per dimension), well below the threshold of 32.
+TEST(TestNanoVDBCUDA, FewTiles_CudaPointsToGrid)
+{
+    using BuildT = nanovdb::ValueOnIndex;
+    const size_t voxelCount = 1 << 16;// 65536
+    std::vector<nanovdb::Coord> voxels;
+    {
+        voxels.reserve(voxelCount);
+        std::srand(12345);
+        const int max = 512, min = -max;
+        auto op = [&](){return rand() % (max - min) + min;};
+        while (voxels.size() < voxelCount) voxels.push_back(nanovdb::Coord(op(), op(), op()));
+    }
+
+    nanovdb::Coord* d_coords;
+    cudaCheck(cudaMalloc(&d_coords, voxels.size() * sizeof(nanovdb::Coord)));
+    cudaCheck(cudaMemcpy(d_coords, voxels.data(), voxels.size() * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));
+
+    auto handle = nanovdb::tools::cuda::voxelsToGrid<BuildT>(d_coords, voxelCount, 1.0);
+
+    EXPECT_TRUE(handle.deviceData());
+    EXPECT_TRUE(handle.deviceGrid<BuildT>());
+    handle.deviceDownload();
+    auto *grid = handle.grid<BuildT>();
+    EXPECT_TRUE(grid);
+    EXPECT_TRUE(grid->valueCount() > 0);
+    EXPECT_EQ(nanovdb::Vec3d(1.0), grid->voxelSize());
+
+    nanovdb::util::forEach(voxels, [&](const nanovdb::util::Range1D &r){
+        auto acc = grid->getAccessor();
+        for (size_t i=r.begin(); i!=r.end(); ++i) {
+            const nanovdb::Coord &ijk = voxels[i];
+            EXPECT_TRUE(acc.probeLeaf(ijk)!=nullptr);
+            EXPECT_TRUE(acc.isActive(ijk));
+            EXPECT_TRUE(acc.getValue(ijk) > 0u);
+            const auto *leaf = acc.get<nanovdb::GetLeaf<BuildT>>(ijk);
+            EXPECT_TRUE(leaf);
+            const auto offset = leaf->CoordToOffset(ijk);
+            EXPECT_EQ(ijk, leaf->offsetToGlobalCoord(offset));
+        }
+    });
+
+    cudaCheck(cudaFree(d_coords));
+}// FewTiles_CudaPointsToGrid
+
+/// @brief Exercises the segmented sort path (>= 32 tiles) in PointsToGrid.
+///        Coordinates in [-8000, 8000] produce 4^3 = 64 upper internal node tiles
+///        (each upper node covers 4096 voxels per dimension), exceeding the threshold of 32.
+TEST(TestNanoVDBCUDA, ManyTiles_CudaPointsToGrid)
+{
+    using BuildT = nanovdb::ValueOnIndex;
+    const size_t voxelCount = 1 << 20;// 1048576
+    std::vector<nanovdb::Coord> voxels;
+    {
+        voxels.reserve(voxelCount);
+        std::srand(54321);
+        const int max = 8000, min = -max;
+        auto op = [&](){return rand() % (max - min) + min;};
+        while (voxels.size() < voxelCount) voxels.push_back(nanovdb::Coord(op(), op(), op()));
+    }
+
+    nanovdb::Coord* d_coords;
+    cudaCheck(cudaMalloc(&d_coords, voxels.size() * sizeof(nanovdb::Coord)));
+    cudaCheck(cudaMemcpy(d_coords, voxels.data(), voxels.size() * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));
+
+    auto handle = nanovdb::tools::cuda::voxelsToGrid<BuildT>(d_coords, voxelCount, 1.0);
+
+    EXPECT_TRUE(handle.deviceData());
+    EXPECT_TRUE(handle.deviceGrid<BuildT>());
+    handle.deviceDownload();
+    auto *grid = handle.grid<BuildT>();
+    EXPECT_TRUE(grid);
+    EXPECT_TRUE(grid->valueCount() > 0);
+    EXPECT_EQ(nanovdb::Vec3d(1.0), grid->voxelSize());
+
+    nanovdb::util::forEach(voxels, [&](const nanovdb::util::Range1D &r){
+        auto acc = grid->getAccessor();
+        for (size_t i=r.begin(); i!=r.end(); ++i) {
+            const nanovdb::Coord &ijk = voxels[i];
+            EXPECT_TRUE(acc.probeLeaf(ijk)!=nullptr);
+            EXPECT_TRUE(acc.isActive(ijk));
+            EXPECT_TRUE(acc.getValue(ijk) > 0u);
+            const auto *leaf = acc.get<nanovdb::GetLeaf<BuildT>>(ijk);
+            EXPECT_TRUE(leaf);
+            const auto offset = leaf->CoordToOffset(ijk);
+            EXPECT_EQ(ijk, leaf->offsetToGlobalCoord(offset));
+        }
+    });
+
+    cudaCheck(cudaFree(d_coords));
+}// ManyTiles_CudaPointsToGrid
 
 TEST(TestNanoVDBCUDA, mergeSplitGrids)
 {
@@ -598,7 +845,7 @@ TEST(TestNanoVDBCUDA, mergeSplitGrids)
         handles1.emplace_back(nanovdb::tools::createLevelSetSphere(radius,nanovdb::Vec3d(0),1,3,
                                                             nanovdb::Vec3d(0), gridNames.back()));
         EXPECT_FALSE(handles1.back().isPadded());
-        size1 += handles1.back().size();
+        size1 += handles1.back().bufferSize();
     }
     EXPECT_EQ(5u, gridNames.size());
     EXPECT_EQ(5u, handles1.size());
@@ -607,7 +854,7 @@ TEST(TestNanoVDBCUDA, mergeSplitGrids)
         gridNames.emplace_back("sphere_" + std::to_string(radius));
         handles2.emplace_back(nanovdb::tools::createLevelSetSphere(radius,nanovdb::Vec3d(0),1,3,
                                                             nanovdb::Vec3d(0), gridNames.back()));
-        size2 += handles2.back().size();
+        size2 += handles2.back().bufferSize();
     }
     EXPECT_EQ(10u, gridNames.size());
     EXPECT_EQ( 5u, handles2.size());
@@ -678,7 +925,7 @@ TEST(TestNanoVDBCUDA, mergeSplitDeviceGrids)
         handles.emplace_back(nanovdb::tools::createLevelSetSphere<float, BufferT>(radius,nanovdb::Vec3d(0),1,3,
                                                            nanovdb::Vec3d(0), gridNames.back()));
         EXPECT_FALSE(handles.back().isPadded());
-        size += handles.back().size();
+        size += handles.back().bufferSize();
     }
     //timer.restart("copy grids to device");
     for (auto &h : handles) h.deviceUpload();
@@ -763,9 +1010,15 @@ TEST(TestNanoVDBCUDA, CudaIndexGridToGrid_basic)
     using BufferT = nanovdb::cuda::DeviceBuffer;
     auto idxHdl = nanovdb::tools::createNanoGrid<nanovdb::FloatGrid, nanovdb::ValueIndex, BufferT>(*floatGrid, 0u, false, false, 1);
     //timer.restart("Copy IndexGrid from CPU to GPU");
+    EXPECT_EQ(1u, idxHdl.buffer().bufferCount());
+    EXPECT_TRUE(idxHdl.buffer().data(0, cudaCpuDeviceId));
+    EXPECT_FALSE(idxHdl.buffer().data(0, 0));
     EXPECT_FALSE(idxHdl.deviceGrid<nanovdb::ValueIndex>());
     idxHdl.deviceUpload();
     EXPECT_TRUE(idxHdl.deviceGrid<nanovdb::ValueIndex>());
+    EXPECT_EQ(2u, idxHdl.buffer().bufferCount());
+    EXPECT_TRUE(idxHdl.buffer().data(0, cudaCpuDeviceId));
+    EXPECT_TRUE(idxHdl.buffer().data(0, 0));
     auto *idxGrid = idxHdl.grid<nanovdb::ValueIndex>();
     EXPECT_TRUE(idxGrid);
     //timer.restart("Create value list on CPU");
@@ -886,63 +1139,74 @@ TEST(TestNanoVDBCUDA, CudaIndexGridToGrid_ValueOnIndex)
     idxHdl.deviceUpload();
     auto *idxGrid = idxHdl.grid<BuildT>();
     EXPECT_TRUE(idxGrid);
-    //timer.restart("Create value list on CPU");
-    float *values = new float[idxGrid->valueCount()], *d_values = nullptr;
-    values[0] = floatGrid->tree().root().background();
-    for (auto it = floatGrid->indexBBox().begin(); it; ++it) {
-        EXPECT_EQ(acc.isActive(*it), idxGrid->tree().isActive(*it));
-        if (acc.isActive(*it)) {
-            const uint64_t idx = idxGrid->tree().getValue(*it);
-            EXPECT_TRUE(idx < idxGrid->valueCount());
-            values[idx] = acc.getValue(*it);
+
+    auto checkConvertedValueGrid = [&](const auto& fromOriginalData, const auto& toOriginalData) {
+        using FloatType = decltype(fromOriginalData(0.0f));
+
+        //timer.restart("Create value list on CPU");
+        FloatType *values = new FloatType[idxGrid->valueCount()], *d_values = nullptr;
+        values[0] = fromOriginalData(floatGrid->tree().root().background());
+        for (auto it = floatGrid->indexBBox().begin(); it; ++it) {
+            EXPECT_EQ(acc.isActive(*it), idxGrid->tree().isActive(*it));
+            if (acc.isActive(*it)) {
+                const uint64_t idx = idxGrid->tree().getValue(*it);
+                EXPECT_TRUE(idx < idxGrid->valueCount());
+                values[idx] = fromOriginalData(acc.getValue(*it));
+            }
         }
-    }
-    //timer.restart("Allocate and copy values from CPU to GPU");
-    cudaCheck(cudaMalloc((void**)&d_values, idxGrid->valueCount()*sizeof(float)));
-    cudaCheck(cudaMemcpy(d_values, values, idxGrid->valueCount()*sizeof(float), cudaMemcpyHostToDevice));
-    EXPECT_FALSE(idxHdl.deviceGrid<float>());
-    auto *d_idxGrid = idxHdl.deviceGrid<BuildT>();
-    EXPECT_TRUE(d_idxGrid);
-    //timer.restart("Call CudaIndexToGrid");
-    auto hdl = nanovdb::tools::cuda::indexToGrid<float>(d_idxGrid, d_values);
-    //timer.restart("unit-test");
-    EXPECT_FALSE(hdl.grid<float>());// no host grid
-    EXPECT_TRUE(hdl.deviceGrid<float>());
-    hdl.deviceDownload();
-    auto *floatGrid2 = hdl.grid<float>();
-    EXPECT_TRUE(floatGrid2);
-    auto acc2 = floatGrid2->getAccessor();
-    EXPECT_EQ(floatGrid->indexBBox(), floatGrid2->indexBBox());
-    EXPECT_EQ(floatGrid->worldBBox(), floatGrid2->worldBBox());
-    EXPECT_EQ(floatGrid->tree().root().background(), floatGrid2->tree().root().background());
-    for (auto it = floatGrid->indexBBox().begin(); it; ++it) {
-        EXPECT_EQ(acc.isActive(*it), acc2.isActive(*it));
-        if (acc.isActive(*it)) EXPECT_EQ(acc.getValue(*it), acc2.getValue(*it));
-    }
-    //timer.stop();
-    cudaFree(d_values);
+        //timer.restart("Allocate and copy values from CPU to GPU");
+        cudaCheck(cudaMalloc((void**)&d_values, idxGrid->valueCount()*sizeof(FloatType)));
+        cudaCheck(cudaMemcpy(d_values, values, idxGrid->valueCount()*sizeof(FloatType), cudaMemcpyHostToDevice));
+        EXPECT_FALSE(idxHdl.deviceGrid<FloatType>());
+        auto *d_idxGrid = idxHdl.deviceGrid<BuildT>();
+        EXPECT_TRUE(d_idxGrid);
+        //timer.restart("Call CudaIndexToGrid");
+        auto hdl = nanovdb::tools::cuda::indexToGrid<FloatType>(d_idxGrid, d_values);
+        //timer.restart("unit-test");
+        EXPECT_FALSE(hdl.template grid<FloatType>());// no host grid
+        EXPECT_TRUE(hdl.template deviceGrid<FloatType>());
+        hdl.deviceDownload();
+        auto *floatGrid2 = hdl.template grid<FloatType>();
+        EXPECT_TRUE(floatGrid2);
+        auto acc2 = floatGrid2->getAccessor();
+        EXPECT_EQ(floatGrid->indexBBox(), floatGrid2->indexBBox());
+        EXPECT_EQ(floatGrid->worldBBox(), floatGrid2->worldBBox());
+        EXPECT_EQ(floatGrid->tree().root().background(), toOriginalData(floatGrid2->tree().root().background()));
+        for (auto it = floatGrid->indexBBox().begin(); it; ++it) {
+            EXPECT_EQ(acc.isActive(*it), acc2.isActive(*it));
+            if (acc.isActive(*it)) EXPECT_EQ(acc.getValue(*it), toOriginalData(acc2.getValue(*it)));
+        }
+        //timer.stop();
+        cudaFree(d_values);
+    };// checkConvertedValueGrid lambda
+    checkConvertedValueGrid([](float x) { return x; }, [](float x) { return x; });
+    checkConvertedValueGrid([](double x) { return float(x); }, [](float x) {return double(x); });
+
+    // Convert index grid to grid of Vec3fs, whereas the original float data is just stored in all components of a Vec3f.
+    // This test covers code in indexToGrid that is only relevant if the size of grid data changes and does not align.
+    checkConvertedValueGrid([](float x) { return nanovdb::Vec3f(x); }, [](const nanovdb::Vec3f& x) { return x[0]; });
 }//  CudaPointToGrid_ValueOnIndex
 
 TEST(TestNanoVDBCUDA, CudaSignedFloodFill)
 {
     using BufferT = nanovdb::cuda::DeviceBuffer;
     //nanovdb::util::Timer timer("Create FloatGrid on CPU");
-    auto floatHdl = nanovdb::tools::createLevelSetSphere<float, BufferT>(100);
+    auto floatHdl = nanovdb::tools::createLevelSetSphere<float, BufferT>(1000);
     auto *floatGrid = floatHdl.grid<float>();
     EXPECT_TRUE(floatGrid);
     auto acc = floatGrid->getAccessor();
-    EXPECT_FALSE(acc.isActive(nanovdb::Coord(103,0,0)));
-    EXPECT_TRUE( acc.isActive(nanovdb::Coord(100,0,0)));
-    EXPECT_FALSE(acc.isActive(nanovdb::Coord( 97,0,0)));
-    EXPECT_EQ( 3.0f, acc(103,0,0));
-    EXPECT_EQ( 0.0f, acc(100,0,0));
-    EXPECT_EQ(-3.0f, acc( 97,0,0));
+    EXPECT_FALSE(acc.isActive(nanovdb::Coord(1003,0,0)));
+    EXPECT_TRUE( acc.isActive(nanovdb::Coord(1000,0,0)));
+    EXPECT_FALSE(acc.isActive(nanovdb::Coord( 997,0,0)));
+    EXPECT_EQ( 3.0f, acc(1003,0,0));
+    EXPECT_EQ( 0.0f, acc(1000,0,0));
+    EXPECT_EQ(-3.0f, acc( 997,0,0));
     using OpT = nanovdb::SetVoxel<float>;// only set the voxel value
-    acc.set<OpT>(nanovdb::Coord(103,0,0),-1.0f);// flip sign and value of inactive voxel
-    acc.set<OpT>(nanovdb::Coord( 97,0,0), 1.0f);// flip sign and value of inactive voxel
-    EXPECT_EQ(-1.0f, acc(103,0,0));
-    EXPECT_EQ( 0.0f, acc(100,0,0));
-    EXPECT_EQ( 1.0f, acc( 97,0,0));
+    acc.set<OpT>(nanovdb::Coord(1003,0,0),-1.0f);// flip sign and value of inactive voxel
+    acc.set<OpT>(nanovdb::Coord( 997,0,0), 1.0f);// flip sign and value of inactive voxel
+    EXPECT_EQ(-1.0f, acc(1003,0,0));
+    EXPECT_EQ( 0.0f, acc(1000,0,0));
+    EXPECT_EQ( 1.0f, acc( 997,0,0));
     //timer.restart("Copy FloatGrid from CPU to GPU");
     floatHdl.deviceUpload();// CPU -> GPU
     auto *d_floatGrid = floatHdl.deviceGrid<float>();
@@ -956,9 +1220,9 @@ TEST(TestNanoVDBCUDA, CudaSignedFloodFill)
     floatGrid = floatHdl.grid<float>();
     EXPECT_TRUE(floatGrid);
     acc = floatGrid->getAccessor();
-    EXPECT_EQ( 3.0f, acc(103,0,0));
-    EXPECT_EQ( 0.0f, acc(100,0,0));
-    EXPECT_EQ(-3.0f, acc( 97,0,0));
+    EXPECT_EQ( 3.0f, acc(1003,0,0));
+    EXPECT_EQ( 0.0f, acc(1000,0,0));
+    EXPECT_EQ(-3.0f, acc( 997,0,0));
     //EXPECT_FALSE(floatGrid->isLexicographic());
     EXPECT_TRUE(floatGrid->isBreadthFirst());
 }//  CudaSignedFloodFill
@@ -2456,7 +2720,7 @@ TEST(TestNanoVDBCUDA, compareNodeOrdering)
         auto *upper1 = grid1->tree().getFirstUpper(), *upper2 = grid2->tree().getFirstUpper();
         EXPECT_TRUE(upper1);
         EXPECT_TRUE(upper2);
-        for (int i=0; i<grid1->tree().nodeCount(2); ++i) {
+        for (uint32_t i=0; i<grid1->tree().nodeCount(2); ++i) {
             //std::cerr << "#" << i << " origin(CPU)=" << upper1[i].origin() << " origin(GPU)=" << upper2[i].origin() << std::endl;
             EXPECT_EQ(upper1[i].origin(),    upper2[i].origin());
             EXPECT_EQ(upper1[i].valueMask(), upper2[i].valueMask());
@@ -2468,7 +2732,7 @@ TEST(TestNanoVDBCUDA, compareNodeOrdering)
         auto *lower1 = grid1->tree().getFirstLower(), *lower2 = grid2->tree().getFirstLower();
         EXPECT_TRUE(lower1);
         EXPECT_TRUE(lower2);
-        for (int i=0; i<grid1->tree().nodeCount(1); ++i) {
+        for (uint32_t i=0; i<grid1->tree().nodeCount(1); ++i) {
             EXPECT_EQ(lower1[i].origin(),    lower2[i].origin());
             EXPECT_EQ(lower1[i].valueMask(), lower2[i].valueMask());
             EXPECT_EQ(lower1[i].childMask(), lower2[i].childMask());
@@ -2479,7 +2743,7 @@ TEST(TestNanoVDBCUDA, compareNodeOrdering)
         auto *leaf1 = grid1->tree().getFirstLeaf(), *leaf2 = grid2->tree().getFirstLeaf();
         EXPECT_TRUE(leaf1);
         EXPECT_TRUE(leaf2);
-        for (int i=0; i<grid1->tree().nodeCount(0); ++i) {
+        for (uint32_t i=0; i<grid1->tree().nodeCount(0); ++i) {
             EXPECT_EQ(leaf1[i].origin(),    leaf2[i].origin());
             EXPECT_EQ(leaf1[i].valueMask(), leaf2[i].valueMask());
         }
@@ -2713,10 +2977,13 @@ TEST(TestNanoVDBCUDA, NodeManager)
     }
 }// NodeManager
 
-TEST(TestNanoVDBCUDA, GridStats)
+
+TEST(TestNanoVDBCUDA, GridStats_UnifiedBuffer)
 {
+
+    using BufferT = nanovdb::cuda::UnifiedBuffer;
     using GridT = nanovdb::NanoGrid<float>;
-    auto handle = nanovdb::tools::createLevelSetSphere<float, nanovdb::cuda::DeviceBuffer>(100,
+    auto handle = nanovdb::tools::createLevelSetSphere<float, BufferT>(100,
                                                                                   nanovdb::Vec3d(0),
                                                                                   1.0,
                                                                                   3.0,
@@ -2819,20 +3086,133 @@ TEST(TestNanoVDBCUDA, GridStats)
         EXPECT_EQ(grid->tree().root().average(),      data->mAverage);
         EXPECT_EQ(grid->tree().root().stdDeviation(), data->mStdDevi);
     }
-}// GridStats
+}// GridStats_UnifiedBuffer
 
-TEST(TestNanoVDBCUDA, cudaIsValid)
+TEST(TestNanoVDBCUDA, GridStats_DeviceBuffer)
 {
-    const auto mode = nanovdb::CheckMode::Full;
+    using BufferT = nanovdb::cuda::DeviceBuffer;
     using GridT = nanovdb::NanoGrid<float>;
-    auto handle = nanovdb::tools::createLevelSetSphere<float, nanovdb::cuda::DeviceBuffer>(100,
+    auto handle = nanovdb::tools::createLevelSetSphere<float, BufferT>(100,
                                                                                   nanovdb::Vec3d(0),
                                                                                   1.0,
                                                                                   3.0,
                                                                                   nanovdb::Vec3d(0),
                                                                                   "test",
-                                                                                  nanovdb::tools::StatsMode::Disable,
-                                                                                  mode);
+                                                                                  nanovdb::tools::StatsMode::Disable);
+    EXPECT_TRUE(handle.data());
+    GridT *grid = handle.grid<float>();
+    EXPECT_TRUE(grid);
+    handle.deviceUpload();
+    GridT *d_grid = handle.deviceGrid<float>();
+    EXPECT_TRUE(d_grid);
+
+    {// check min/max using const iterators
+        float min = std::numeric_limits<float>::max(), max = -min;
+        int n2=0, n1=0, n0=0;// check that nodes are arranged breath-first in memory
+        for (auto it2 = grid->tree().root().cbeginChild(); it2; ++it2) {
+            EXPECT_EQ(grid->tree().getFirstUpper() + n2++, &(*it2));
+            for (auto it1 = it2->cbeginChild(); it1; ++it1) {
+                EXPECT_EQ(grid->tree().getFirstLower() + n1++, &(*it1));
+                for (auto it0 = it1->cbeginChild(); it0; ++it0) {
+                    EXPECT_EQ(grid->tree().getFirstLeaf() + n0++, &(*it0));
+                    for (auto it = it0->cbeginValueOn(); it; ++it) {
+                        if (*it < min) min = *it;
+                        if (*it > max) max = *it;
+                    }
+                }// loop over child nodes of the lower internal node
+            }// loop over child nodes of the upper internal node
+        }// loop over child nodes of the root node
+        EXPECT_NE(min, grid->tree().root().minimum());
+        EXPECT_NE(max, grid->tree().root().maximum());
+        EXPECT_EQ(n2, grid->tree().nodeCount(2));
+        EXPECT_EQ(n1, grid->tree().nodeCount(1));
+        EXPECT_EQ(n0, grid->tree().nodeCount(0));
+    }
+    {
+        //nanovdb::util::Timer cpuTimer("CPU gridStats: Default = Full");
+        nanovdb::tools::updateGridStats(grid);
+        //cpuTimer.stop();
+    }
+    {// check min/max using const iterators
+        float min = std::numeric_limits<float>::max(), max = -min;
+        int n2=0, n1=0, n0=0;// check that nodes are arranged breath-first in memory
+        for (auto it2 = grid->tree().root().cbeginChild(); it2; ++it2) {
+            EXPECT_EQ(grid->tree().getFirstUpper() + n2++, &(*it2));
+            for (auto it1 = it2->cbeginChild(); it1; ++it1) {
+                EXPECT_EQ(grid->tree().getFirstLower() + n1++, &(*it1));
+                for (auto it0 = it1->cbeginChild(); it0; ++it0) {
+                    EXPECT_EQ(grid->tree().getFirstLeaf() + n0++, &(*it0));
+                    for (auto it = it0->cbeginValueOn(); it; ++it) {
+                        if (*it < min) min = *it;
+                        if (*it > max) max = *it;
+                    }
+                }// loop over child nodes of the lower internal node
+            }// loop over child nodes of the upper internal node
+        }// loop over child nodes of the root node
+        EXPECT_EQ(min, grid->tree().root().minimum());
+        EXPECT_EQ(max, grid->tree().root().maximum());
+        EXPECT_EQ(n2, grid->tree().nodeCount(2));
+        EXPECT_EQ(n1, grid->tree().nodeCount(1));
+        EXPECT_EQ(n0, grid->tree().nodeCount(0));
+    }
+    {// check min/max using non-const iterators
+        float min = std::numeric_limits<float>::max(), max = -min;
+        int n2=0, n1=0, n0=0;// check that nodes are arranged breath-first in memory
+        for (auto it2 = grid->tree().root().beginChild(); it2; ++it2) {
+            EXPECT_EQ(grid->tree().getFirstUpper() + n2++, &(*it2));
+            for (auto it1 = it2->beginChild(); it1; ++it1) {
+                EXPECT_EQ(grid->tree().getFirstLower() + n1++, &(*it1));
+                for (auto it0 = it1->beginChild(); it0; ++it0) {
+                    EXPECT_EQ(grid->tree().getFirstLeaf() + n0++, &(*it0));
+                    for (auto it = it0->beginValueOn(); it; ++it) {
+                        if (*it < min) min = *it;
+                        if (*it > max) max = *it;
+                    }
+                }// loop over child nodes of the lower internal node
+            }// loop over child nodes of the upper internal node
+        }// loop over child nodes of the root node
+        EXPECT_EQ(min, grid->tree().root().minimum());
+        EXPECT_EQ(max, grid->tree().root().maximum());
+        EXPECT_EQ(n2, grid->tree().nodeCount(2));
+        EXPECT_EQ(n1, grid->tree().nodeCount(1));
+        EXPECT_EQ(n0, grid->tree().nodeCount(0));
+    }
+
+    {
+        //nanovdb::util::cuda::Timer gpuTimer("GPU gridStats: Default = Full");
+        nanovdb::tools::cuda::updateGridStats(d_grid);
+        //gpuTimer.stop();
+    }
+    {// check bbox and stats of device grid
+        using DataT = nanovdb::NanoRoot<float>::DataType;
+        std::unique_ptr<char[]> buffer(new char[sizeof(DataT)]);
+        cudaMemcpy(buffer.get(), (char*)d_grid + sizeof(nanovdb::GridData) + sizeof(nanovdb::TreeData), sizeof(DataT), cudaMemcpyDeviceToHost);
+        auto *data = (const DataT*)buffer.get();
+        EXPECT_EQ(grid->indexBBox(), data->mBBox);
+        EXPECT_EQ(grid->tree().root().background(),   data->mBackground);
+        EXPECT_EQ(grid->tree().root().minimum(),      data->mMinimum);
+        EXPECT_EQ(grid->tree().root().maximum(),      data->mMaximum);
+        EXPECT_EQ(grid->tree().root().average(),      data->mAverage);
+        EXPECT_EQ(grid->tree().root().stdDeviation(), data->mStdDevi);
+    }
+}// GridStats_DeviceBuffer
+
+// make -j && ./unittest/testNanoVDB --gtest_filter="*cudaIsValid*" --gtest_repeat=10
+TEST(TestNanoVDBCUDA, cudaIsValid_DeviceBuffer)
+{
+    using BufferT = nanovdb::cuda::DeviceBuffer;
+    const auto mode = nanovdb::CheckMode::Full;
+    using GridT = nanovdb::NanoGrid<float>;
+    nanovdb::util::Timer timer("createLevelSetSphere<DeviceBuffer>(500)");
+    auto handle = nanovdb::tools::createLevelSetSphere<float, BufferT>(500,
+                                                                       nanovdb::Vec3d(0),
+                                                                       1.0,
+                                                                       3.0,
+                                                                       nanovdb::Vec3d(0),
+                                                                       "test",
+                                                                       nanovdb::tools::StatsMode::Disable,
+                                                                       mode);
+    timer.stop();
     EXPECT_TRUE(handle.data());
     GridT *grid = handle.grid<float>();
     EXPECT_TRUE(grid);
@@ -2848,4 +3228,515 @@ TEST(TestNanoVDBCUDA, cudaIsValid)
     EXPECT_FALSE(nanovdb::isValid(grid,       mode, verbose));
     handle.deviceUpload();
     EXPECT_FALSE(nanovdb::tools::cuda::isValid(d_grid, mode, verbose));
-}// cudaIsValid
+}// cudaIsValid_DeviceBuffer
+
+TEST(TestNanoVDBCUDA, cudaIsValid_UnifiedBuffer)
+{
+    using BufferT = nanovdb::cuda::UnifiedBuffer;
+    const auto mode = nanovdb::CheckMode::Full;
+    using GridT = nanovdb::NanoGrid<float>;
+    nanovdb::util::Timer timer("createLevelSetSphere<UnifiedBuffer>(500)");
+    auto handle = nanovdb::tools::createLevelSetSphere<float, BufferT>(500,
+                                                                       nanovdb::Vec3d(0),
+                                                                       1.0,
+                                                                       3.0,
+                                                                       nanovdb::Vec3d(0),
+                                                                       "test",
+                                                                       nanovdb::tools::StatsMode::Disable,
+                                                                       mode);
+    timer.stop();
+    EXPECT_TRUE(handle.data());
+    GridT *grid = handle.grid<float>();
+    EXPECT_TRUE(grid);
+    handle.deviceUpload();
+    GridT *d_grid = handle.deviceGrid<float>();
+    EXPECT_TRUE(d_grid);
+    const bool verbose = false;
+
+    EXPECT_TRUE(nanovdb::isValid(grid,        mode, verbose));
+    EXPECT_TRUE(nanovdb::tools::cuda::isValid(d_grid,  mode, verbose));
+
+    grid->mGridType = nanovdb::GridType::Vec3f;
+    EXPECT_FALSE(nanovdb::isValid(grid,       mode, verbose));
+    handle.deviceUpload();
+    EXPECT_FALSE(nanovdb::tools::cuda::isValid(d_grid, mode, verbose));
+}// cudaIsValid_UnifiedBuffer
+
+TEST(TestNanoVDBCUDA, cudaIsValid_HostBuffer)
+{
+    using BufferT = nanovdb::HostBuffer;
+    const auto mode = nanovdb::CheckMode::Full;
+    using GridT = nanovdb::NanoGrid<float>;
+    nanovdb::util::Timer timer("createLevelSetSphere<UnifiedBuffer>(500)");
+    auto handle = nanovdb::tools::createLevelSetSphere<float, BufferT>(500,
+                                                                       nanovdb::Vec3d(0),
+                                                                       1.0,
+                                                                       3.0,
+                                                                       nanovdb::Vec3d(0),
+                                                                       "test",
+                                                                       nanovdb::tools::StatsMode::Disable,
+                                                                       mode);
+    timer.stop();
+    EXPECT_TRUE(handle.data());
+    GridT *grid = handle.grid<float>();
+    EXPECT_TRUE(grid);
+}// cudaIsValid_HostBuffer
+
+TEST(TestNanoVDBCUDA, overSizedDeviceBuffer)
+{
+    // create a grid in a host buffer that exactly fits the grid
+    auto handle1 = nanovdb::tools::createLevelSetSphere();
+    const size_t gridSize = handle1.gridSize();
+    EXPECT_EQ(gridSize, handle1.bufferSize());
+    EXPECT_EQ(gridSize, handle1.totalGridSize());
+    EXPECT_EQ(0       , handle1.freeSize());
+    EXPECT_EQ(1       , handle1.gridCount());
+    EXPECT_TRUE(handle1.isFull());
+
+    // copy grid to an oversized device buffer
+    using BufferT = nanovdb::cuda::DeviceBuffer;
+    auto overSizedBuffer = BufferT(2*gridSize, false);// only allocate the device buffer
+    cudaMemcpy(overSizedBuffer.deviceData(), handle1.data(), gridSize, cudaMemcpyHostToDevice);
+
+    // construct handle from over-sized device buffer and test it
+    nanovdb::GridHandle<BufferT> handle2(std::move(overSizedBuffer));
+    EXPECT_EQ(1         , handle2.gridCount());
+    EXPECT_EQ(  gridSize, handle2.gridSize());
+    EXPECT_EQ(  gridSize, handle2.totalGridSize());
+    EXPECT_EQ(2*gridSize, handle2.bufferSize());
+    EXPECT_EQ(  gridSize, handle2.freeSize());
+    EXPECT_FALSE(handle2.isFull());
+}// overSizedDeviceBuffer
+
+__global__ void initKernel(int N, int *x)
+{
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= N) return;
+    x[tid] = 2;
+}
+
+// make -j && ./unittest/testNanoVDB --gtest_filter="*UnifiedBuffer*" --gtest_repeat=2
+TEST(TestNanoVDBCUDA, UnifiedBuffer_basic)
+{
+    int device = 0;
+    cudaSetDevice(device);// set the default device to GPU #0
+    size_t free, total;
+    cudaMemGetInfo( &free, &total );
+    std::cout << "GPU #" << device << " memory: free = " << (free>>30) << " GB, total = " << (total>>30) << " GB\n";
+
+    cudaStream_t stream;
+    cudaCheck(cudaStreamCreate(&stream));
+    const size_t N = 1<<20, size = N*sizeof(int), capacity = 20*size;// over-allocation
+
+    nanovdb::cuda::UnifiedBuffer buffer(size, capacity);
+    EXPECT_EQ(size, buffer.size());
+    EXPECT_EQ(capacity, buffer.capacity());
+    {// set N values on the host
+        //buffer.deviceDownload(stream);
+        buffer.prefetch(0, size, cudaCpuDeviceId, stream);
+        nanovdb::util::Timer timer("Setting values on CPU with unified memory");
+        int *x = buffer.data<int>();
+        for (size_t i = 0; i < N; i++) *x++ = 1;
+        timer.stop();
+    }
+    {// resize unified buffers
+        nanovdb::util::Timer timer("resize unified buffer");
+        buffer.resize(2*size);
+        timer.stop();
+        EXPECT_EQ(2*size, buffer.size());
+        EXPECT_EQ(capacity, buffer.capacity());
+    }
+    {
+        //buffer.deviceUpload(0, stream);
+        buffer.prefetch(size, size, 0, stream);
+        nanovdb::util::cuda::Timer timer("Setting values on GPU with unified memory", stream);
+        static const int blockSize = 256, numBlocks = (N + blockSize - 1) / blockSize;
+        initKernel<<<numBlocks, blockSize, 0, stream>>>(N, buffer.data<int>(N));
+        timer.stop();
+    }
+
+    EXPECT_EQ(CUDA_SUCCESS, cudaStreamSynchronize(stream));
+    int *x = buffer.data<int>();
+    for (size_t i = 0; i < N; ++i) EXPECT_EQ(1, *x++);
+    for (size_t i = 0; i < N; ++i) EXPECT_EQ(2, *x++);
+
+    nanovdb::cuda::UnifiedBuffer otherBuffer(std::move(buffer));
+    int *y = otherBuffer.data<int>();
+    for (size_t i = 0; i < N; ++i) EXPECT_EQ(1, *y++);
+    for (size_t i = 0; i < N; ++i) EXPECT_EQ(2, *y++);
+}// UnifiedBuffer_basic
+
+TEST(TestNanoVDBCUDA, UnifiedBuffer_IO)
+{
+    //cudaSetDevice(0);// loads runtime context
+    using BufferT = nanovdb::cuda::UnifiedBuffer;
+    const size_t size = 8*(1ULL << 30);// 8 GB
+    cudaStream_t stream;
+    cudaCheck(cudaStreamCreate(&stream));
+    {
+        auto buffer = BufferT::create(size, nullptr, true, (void*)stream);
+        EXPECT_EQ(CUDA_SUCCESS, cudaStreamSynchronize(stream));
+        EXPECT_EQ(size, buffer.size());
+        EXPECT_EQ(size, buffer.capacity());
+    }
+    {// size = capacity
+        auto handle = nanovdb::io::readGrid<BufferT>("data/3_spheres.nvdb", 0);
+        auto nanoGrid = handle.grid<float>();
+        EXPECT_EQ(handle.size(), handle.buffer().capacity());
+        EXPECT_EQ(handle.buffer().size(), handle.buffer().capacity());
+        EXPECT_TRUE(nanoGrid);
+        EXPECT_EQ(1u, handle.gridCount());
+        auto *grid = handle.grid<float>();
+        EXPECT_TRUE(grid);
+        EXPECT_EQ(0u, grid->gridIndex());
+        EXPECT_EQ(1u, grid->gridCount());
+        EXPECT_TRUE(nanovdb::tools::validateChecksum(grid));
+        EXPECT_TRUE(nanovdb::tools::validateChecksum(grid, nanovdb::CheckMode::Full));
+    }
+    {// size < capacity
+        BufferT reference(0, size);
+        auto handle = nanovdb::io::readGrid<BufferT>("data/3_spheres.nvdb", 0, 0, reference);
+        auto nanoGrid = handle.grid<float>();
+        EXPECT_LT(handle.buffer().size(), handle.buffer().capacity());
+        EXPECT_EQ(size, handle.buffer().capacity());
+        EXPECT_TRUE(nanoGrid);
+        EXPECT_EQ(1u, handle.gridCount());
+        auto *grid = handle.grid<float>();
+        EXPECT_TRUE(grid);
+        EXPECT_EQ(0u, grid->gridIndex());
+        EXPECT_EQ(1u, grid->gridCount());
+        EXPECT_TRUE(nanovdb::tools::validateChecksum(grid));
+        EXPECT_TRUE(nanovdb::tools::validateChecksum(grid, nanovdb::CheckMode::Full));
+    }
+}// UnifiedBuffer_IO
+
+TEST(TestNanoVDBCUDA, UnifiedBuffer_createLevelSetSphere)
+{
+    using BufferT = nanovdb::cuda::UnifiedBuffer;
+    const int radius = 100, center = 50, width = 3, voxelSize = 1;
+    const std::string gridName("sphere_" + std::to_string(radius));
+    auto handle = nanovdb::tools::createLevelSetSphere<float, BufferT>(radius, nanovdb::Vec3d(center),
+                                                                       voxelSize, width, nanovdb::Vec3d(0), gridName);
+
+    EXPECT_TRUE(handle);
+    EXPECT_EQ(1u, handle.gridCount());
+    EXPECT_EQ(handle.size(), handle.buffer().capacity());
+    auto* meta = handle.gridMetaData();
+    EXPECT_TRUE(meta);
+    EXPECT_EQ(gridName, std::string(meta->shortGridName()));
+    EXPECT_EQ(nanovdb::GridType::Float, meta->gridType());
+    EXPECT_EQ(nanovdb::GridClass::LevelSet, meta->gridClass());
+    auto* dstGrid = handle.grid<float>();
+    EXPECT_TRUE(dstGrid);
+    EXPECT_EQ(dstGrid->gridSize(), handle.buffer().capacity());
+    EXPECT_EQ(gridName, std::string(dstGrid->gridName()));
+
+    EXPECT_TRUE(dstGrid->hasBBox());
+    EXPECT_TRUE(dstGrid->hasMinMax());
+    EXPECT_TRUE(dstGrid->hasAverage());
+    EXPECT_TRUE(dstGrid->hasStdDeviation());
+
+    EXPECT_NEAR( -3.0f, dstGrid->tree().root().minimum(), 0.04f);
+    EXPECT_NEAR(  3.0f, dstGrid->tree().root().maximum(), 0.04f);
+    EXPECT_NEAR(  0.0f, dstGrid->tree().root().average(), 0.30f);
+
+    EXPECT_EQ(nanovdb::Coord(center - radius - 2), dstGrid->indexBBox()[0]);
+    EXPECT_EQ(nanovdb::Coord(center + radius + 2), dstGrid->indexBBox()[1]);
+} // UnifiedBuffer_createLevelSetSphere
+
+template<class BuildT>
+__global__ void testComputeStencilNeighborsKernel(
+    nanovdb::NanoGrid<BuildT> *grid,
+    uint32_t *firstLeafIDArray,
+    uint64_t *jumpMapArray,
+    uint64_t *stencilNeighborsArray)
+{
+    static constexpr int Log2BlockWidth = 7;
+    using VBM = nanovdb::tools::cuda::VoxelBlockManager<Log2BlockWidth>;
+    static constexpr int BlockWidth = VBM::BlockWidth;
+    static constexpr int JumpMapLength = VBM::JumpMapLength;
+    int bID = blockIdx.x;
+    int tID = threadIdx.x;
+
+    uint32_t &firstLeafID = firstLeafIDArray[bID];
+    uint64_t *jumpMap = jumpMapArray + JumpMapLength * bID;
+    int firstOffset = 1;
+    int blockFirstOffset = firstOffset + bID * BlockWidth;
+    __shared__ uint32_t leafIndex[BlockWidth];
+    __shared__ uint16_t voxelOffset[BlockWidth];
+
+    nanovdb::tools::cuda::VoxelBlockManager<Log2BlockWidth>::decodeInverseMaps(
+        grid, firstLeafID, jumpMap, blockFirstOffset, &leafIndex[0], &voxelOffset[0]);
+
+    uint64_t localNeighbors[27] = {};
+    nanovdb::tools::cuda::VoxelBlockManager<Log2BlockWidth>::computeBoxStencil(
+        grid, &leafIndex[0], &voxelOffset[0], localNeighbors);
+    __syncthreads();
+
+    using StencilNeighborsType = uint64_t (*)[27];
+    auto stencilNeighbors = reinterpret_cast<StencilNeighborsType>(stencilNeighborsArray+27*BlockWidth*bID);
+    for (int i = 0; i < 27; i++)
+        stencilNeighbors[tID][i] = localNeighbors[i];
+}
+
+template<class BuildT, class BufferT>
+void testVoxelBlockManager()
+{
+    // Create a test domain (21^3 box)
+    std::vector<nanovdb::Coord> voxels;
+    nanovdb::CoordBBox bbox = nanovdb::CoordBBox::createCube(125,145); // Coordinates chosen to span more than 1 lower node
+    for (auto it = bbox.begin(); it; it++) voxels.push_back(*it);
+    constexpr int Log2BlockWidth = 7;
+    using VBM = nanovdb::tools::cuda::VoxelBlockManager<Log2BlockWidth>;
+    constexpr auto BlockWidth = VBM::BlockWidth;
+    const std::size_t nVoxels = voxels.size();
+    const std::size_t nBlocks = (nVoxels + BlockWidth - 1) >> Log2BlockWidth;
+    nanovdb::Coord *deviceVoxels;
+    cudaCheck(cudaMalloc(&deviceVoxels, nVoxels * sizeof(nanovdb::Coord)));
+    cudaCheck(cudaMemcpy(deviceVoxels, voxels.data(), nVoxels * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice)); // CPU -> GPU
+    auto handle = nanovdb::tools::cuda::voxelsToGrid<BuildT>(deviceVoxels, nVoxels);
+    cudaCheck(cudaFree(deviceVoxels));
+    EXPECT_TRUE((handle.deviceData())); // grid only exists on the GPU
+    auto deviceGrid = handle.template deviceGrid<BuildT>();
+    EXPECT_FALSE(handle.data()); // no grid was yet allocated on the CPU
+    handle.deviceDownload();
+    EXPECT_TRUE(handle.data()); // no grid was yet allocated on the CPU
+    auto grid = handle.template grid<BuildT>();
+    EXPECT_TRUE(grid);
+    // Construct VBM structure
+    auto vbmHandle = nanovdb::tools::cuda::buildVoxelBlockManager<Log2BlockWidth, BufferT>(
+        deviceGrid);
+
+    // Compute stencil neighbors
+    const size_t neighborStencilSize = nBlocks * BlockWidth * 27 * sizeof(uint64_t);
+    auto neighborStencilBuffer = nanovdb::cuda::DeviceBuffer::create(neighborStencilSize, nullptr, false);
+    EXPECT_TRUE(neighborStencilBuffer.deviceData());
+    testComputeStencilNeighborsKernel<<<nBlocks,BlockWidth>>>(deviceGrid,
+        vbmHandle.deviceFirstLeafID(), vbmHandle.deviceJumpMap(),
+        reinterpret_cast<uint64_t*>(neighborStencilBuffer.deviceData()));
+    cudaCheck(cudaGetLastError());
+
+    // Verify stencil neighbors against results of standard accessors
+    neighborStencilBuffer.deviceDownload();
+    EXPECT_TRUE(neighborStencilBuffer.data());
+    using StencilNeighborsType = uint64_t (*)[27];
+    auto stencilNeighbors = reinterpret_cast<StencilNeighborsType>(neighborStencilBuffer.data());
+    auto acc = grid->getAccessor();
+    for (const auto& coord : voxels) {
+        const auto index = acc.getValue(coord);
+        for (int di = -1; di <= 1; di++)
+        for (int dj = -1; dj <= 1; dj++)
+        for (int dk = -1; dk <= 1; dk++) {
+            int spokeID = ( di + 1 ) * 9 + ( dj + 1 ) * 3 + dk + 1;
+            const auto neighbor = coord.offsetBy( di, dj, dk );
+            const auto neighborIndex = acc.getValue(neighbor);
+            EXPECT_EQ( neighborIndex, stencilNeighbors[index-1][spokeID] ); } }
+}
+
+TEST(TestNanoVDBCUDA, VoxelBlockManager_ValueOnIndex)
+{
+    testVoxelBlockManager<nanovdb::ValueOnIndex,nanovdb::cuda::DeviceBuffer>();
+}// VoxelBlockManager_ValueOnIndex
+
+TEST(TestNanoVDBCUDA, VoxelBlockManager_ValueOnIndex_UnifiedBuffer)
+{
+    testVoxelBlockManager<nanovdb::ValueOnIndex,nanovdb::cuda::UnifiedBuffer>();
+}// VoxelBlockManager_ValueOnIndex_UnifiedBuffer
+
+TEST(TestNanoVDBCUDA, DilateInjectPrune_ValueOnIndex)
+{
+    using BuildT = nanovdb::ValueOnIndex;
+
+    // Create an input (original) grid to use as input to dilation op
+    std::vector<nanovdb::Coord> inputPoints;
+    inputPoints.emplace_back(1,0,0); // Added nodes after dilation: 3 root, 3 upper, 3 lower, 3 leaf
+    inputPoints.emplace_back(0,1,1); // Added nodes after dilation: 1 root, 1 upper, 1 lower, 1 leaf
+    inputPoints.emplace_back(127,127,127); // Added nodes after dilation: 7 lower, 7 leaf
+    auto inputBuffer = nanovdb::cuda::DeviceBuffer::create( inputPoints.size() * sizeof(nanovdb::Coord), nullptr, false);
+    EXPECT_FALSE(inputBuffer.data());
+    EXPECT_TRUE(inputBuffer.deviceData());
+    cudaCheck(cudaMemcpy(inputBuffer.deviceData(), inputPoints.data(), inputPoints.size() * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));
+    nanovdb::tools::cuda::PointsToGrid<BuildT> converter;
+    converter.setChecksum(nanovdb::CheckMode::Default);
+    auto inputHandle = converter.getHandle(static_cast<nanovdb::Coord*>(inputBuffer.deviceData()), inputPoints.size());
+    EXPECT_TRUE(inputHandle.deviceGrid<BuildT>());
+    auto inputGrid = inputHandle.deviceGrid<BuildT>();
+    EXPECT_FALSE(inputHandle.grid<BuildT>());
+
+    // Perform dilation
+    nanovdb::tools::cuda::DilateGrid<BuildT> dilator( inputGrid );
+    dilator.setOperation(nanovdb::tools::morphology::NN_FACE_EDGE_VERTEX);
+    dilator.setChecksum(nanovdb::CheckMode::Default);
+    dilator.setVerbose(0);
+    auto dilatedHandle = dilator.getHandle();
+    auto dilatedGrid = dilatedHandle.deviceGrid<BuildT>();
+    EXPECT_TRUE(dilatedGrid);
+    auto dilatedTreeData = nanovdb::util::cuda::DeviceGridTraits<BuildT>::getTreeData(dilatedGrid);
+    EXPECT_EQ(dilatedTreeData.mNodeCount[0], 13);
+    EXPECT_EQ(dilatedTreeData.mNodeCount[1], 12);
+    EXPECT_EQ(dilatedTreeData.mNodeCount[2], 5);
+    EXPECT_EQ(dilatedTreeData.mVoxelCount, 73);
+
+    // Create a prune mask (set bits correspond to retained voxels) from the occupancy of the original grid
+    auto maskBuffer = nanovdb::cuda::DeviceBuffer::create( dilatedTreeData.mNodeCount[0] * sizeof(nanovdb::Mask<3>), nullptr, false);
+    EXPECT_TRUE(maskBuffer.deviceData());
+    auto leafMasks = static_cast<nanovdb::Mask<3>*>(maskBuffer.deviceData());
+    constexpr unsigned int num_threads = 128;
+    unsigned int num_blocks = (static_cast<unsigned int>(dilatedTreeData.mNodeCount[0]) + num_threads - 1) / num_threads;
+    nanovdb::util::cuda::lambdaKernel<<<num_blocks, num_threads>>>(dilatedTreeData.mNodeCount[0],
+        nanovdb::util::cuda::InjectGridMaskFunctor<BuildT>(),
+        inputGrid, dilatedGrid, leafMasks);
+
+    // Prune with computed mask
+    nanovdb::tools::cuda::PruneGrid<BuildT> pruner( dilatedGrid, leafMasks );
+    pruner.setChecksum(nanovdb::CheckMode::Default);
+    pruner.setVerbose(0);
+    auto prunedHandle = pruner.getHandle();
+    auto prunedGrid = prunedHandle.deviceGrid<BuildT>();
+    EXPECT_TRUE(prunedGrid);
+
+    // The pruned grid should be identical to the original input
+    EXPECT_FALSE(prunedHandle.grid<BuildT>());
+    inputHandle.deviceDownload();
+    prunedHandle.deviceDownload();
+    EXPECT_TRUE(inputHandle.grid<BuildT>());
+    EXPECT_TRUE(prunedHandle.grid<BuildT>());
+    EXPECT_EQ(inputHandle.grid<BuildT>()->mChecksum.full(), prunedHandle.grid<BuildT>()->mChecksum.full());
+}// DilateInjectPrune_ValueOnIndex
+
+TEST(TestNanoVDBCUDA, RefineCoarsen_ValueOnIndex)
+{
+    using BuildT = nanovdb::ValueOnIndex;
+
+    // Create an input (original) grid to use as input to refinement op
+    std::vector<nanovdb::Coord> inputPoints;
+    inputPoints.emplace_back(0,0,0); // Refinement doesn't introduce extra nodes
+    inputPoints.emplace_back(4,0,0); // Refinement will introduce extra leaf
+    inputPoints.emplace_back(0,64,0); // Refinement will introduce extra lower node
+    inputPoints.emplace_back(0,0,2048); // Refinement will introduce extra upper node (and root tile)
+    auto inputBuffer = nanovdb::cuda::DeviceBuffer::create( inputPoints.size() * sizeof(nanovdb::Coord), nullptr, false);
+    EXPECT_FALSE(inputBuffer.data());
+    EXPECT_TRUE(inputBuffer.deviceData());
+    cudaCheck(cudaMemcpy(inputBuffer.deviceData(), inputPoints.data(), inputPoints.size() * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));
+    nanovdb::tools::cuda::PointsToGrid<BuildT> converter;
+    converter.setChecksum(nanovdb::CheckMode::Default);
+    auto inputHandle = converter.getHandle(static_cast<nanovdb::Coord*>(inputBuffer.deviceData()), inputPoints.size());
+    EXPECT_TRUE(inputHandle.deviceGrid<BuildT>());
+    auto inputGrid = inputHandle.deviceGrid<BuildT>();
+    EXPECT_FALSE(inputHandle.grid<BuildT>());
+
+    // Perform refinement
+    nanovdb::tools::cuda::RefineGrid<BuildT> refiner( inputGrid );
+    refiner.setChecksum(nanovdb::CheckMode::Default);
+    refiner.setVerbose(0);
+    auto refinedHandle = refiner.getHandle();
+    auto refinedGrid = refinedHandle.deviceGrid<BuildT>();
+    EXPECT_TRUE(refinedGrid);
+    auto refinedTreeData = nanovdb::util::cuda::DeviceGridTraits<BuildT>::getTreeData(refinedGrid);
+    EXPECT_EQ(refinedTreeData.mNodeCount[0], 4);
+    EXPECT_EQ(refinedTreeData.mNodeCount[1], 3);
+    EXPECT_EQ(refinedTreeData.mNodeCount[2], 2);
+    EXPECT_EQ(refinedTreeData.mVoxelCount, 32);
+
+    // Coarsen back to original
+    nanovdb::tools::cuda::CoarsenGrid<BuildT> coarsener( refinedGrid );
+    coarsener.setChecksum(nanovdb::CheckMode::Default);
+    coarsener.setVerbose(0);
+    auto coarsenedHandle = coarsener.getHandle();
+    auto coarsenedGrid = coarsenedHandle.deviceGrid<BuildT>();
+    EXPECT_TRUE(coarsenedGrid);
+
+    // The coarsened grid should be identical to the original input
+    EXPECT_FALSE(coarsenedHandle.grid<BuildT>());
+    inputHandle.deviceDownload();
+    coarsenedHandle.deviceDownload();
+    EXPECT_TRUE(inputHandle.grid<BuildT>());
+    EXPECT_TRUE(coarsenedHandle.grid<BuildT>());
+    EXPECT_EQ(inputHandle.grid<BuildT>()->mChecksum.full(), coarsenedHandle.grid<BuildT>()->mChecksum.full());
+}// RefineCoarsen_ValueOnIndex
+
+TEST(TestNanoVDBCUDA, MergeGrids_ValueOnIndex)
+{
+    using BuildT = nanovdb::ValueOnIndex;
+
+    // Create the first input grid for the merge op
+    std::vector<nanovdb::Coord> inputPointsA;
+    for (int i = 0; i <= 2; i++)
+        for (int j = 0; j <= 2; j++)
+            for (int k = 0; k <= 2; k++)
+                inputPointsA.emplace_back(i-1, j*8-1, k*128); // 4 upper, 12 lower, 18 leaf nodes
+    auto inputBufferA = nanovdb::cuda::DeviceBuffer::create( inputPointsA.size() * sizeof(nanovdb::Coord), nullptr, false);
+    EXPECT_FALSE(inputBufferA.data());
+    EXPECT_TRUE(inputBufferA.deviceData());
+    cudaCheck(cudaMemcpy(inputBufferA.deviceData(), inputPointsA.data(), inputPointsA.size() * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));
+    auto inputHandleA = nanovdb::tools::cuda::voxelsToGrid<BuildT>(static_cast<nanovdb::Coord*>(inputBufferA.deviceData()), inputPointsA.size());
+    EXPECT_TRUE(inputHandleA.deviceGrid<BuildT>());
+    auto inputGridA = inputHandleA.deviceGrid<BuildT>();
+    EXPECT_FALSE(inputHandleA.grid<BuildT>());
+
+    // Create the second input grid for the merge op
+    std::vector<nanovdb::Coord> inputPointsB;
+    for (int i = 0; i <= 2; i++)
+        for (int j = 0; j <= 2; j++)
+            for (int k = 0; k <= 2; k++)
+                inputPointsB.emplace_back(i, j*8-1, (k-1)*128); // 4 upper, 6 lower, 9 leaf nodes
+    auto inputBufferB = nanovdb::cuda::DeviceBuffer::create( inputPointsB.size() * sizeof(nanovdb::Coord), nullptr, false);
+    EXPECT_FALSE(inputBufferB.data());
+    EXPECT_TRUE(inputBufferB.deviceData());
+    cudaCheck(cudaMemcpy(inputBufferB.deviceData(), inputPointsB.data(), inputPointsB.size() * sizeof(nanovdb::Coord), cudaMemcpyHostToDevice));
+    auto inputHandleB = nanovdb::tools::cuda::voxelsToGrid<BuildT>(static_cast<nanovdb::Coord*>(inputBufferB.deviceData()), inputPointsB.size());
+    EXPECT_TRUE(inputHandleB.deviceGrid<BuildT>());
+    auto inputGridB = inputHandleB.deviceGrid<BuildT>();
+    EXPECT_FALSE(inputHandleB.grid<BuildT>());
+
+    // Perform the merge operation
+    nanovdb::tools::cuda::MergeGrids<BuildT> merger( inputGridA, inputGridB );
+    merger.setChecksum(nanovdb::CheckMode::Disable);
+    merger.setVerbose(0);
+    auto mergedHandle = merger.getHandle();
+    auto mergedGrid = mergedHandle.deviceGrid<BuildT>();
+    EXPECT_TRUE(mergedGrid);
+    auto mergedTreeData = nanovdb::util::cuda::DeviceGridTraits<BuildT>::getTreeData(mergedGrid);
+    EXPECT_EQ(mergedTreeData.mNodeCount[0], 21);
+    EXPECT_EQ(mergedTreeData.mNodeCount[1], 14);
+    EXPECT_EQ(mergedTreeData.mNodeCount[2], 6);
+    EXPECT_EQ(mergedTreeData.mVoxelCount, 42); // Each input grid has 27 active voxels, 12 shared between the two
+}// DilateInjectPrune_ValueOnIndex
+
+TEST(TestNanoVDBCUDA, GridHandle_from_HostBuffer)
+{
+    using namespace nanovdb;
+    using BufferT = nanovdb::cuda::DeviceBuffer;
+    auto hostHandle = tools::createLevelSetSphere<float>(100, Vec3d(0),1,3, Vec3d(0), "test");
+
+    int dev;
+    cudaError_t err = cudaGetDevice(&dev);
+    EXPECT_EQ(err, cudaSuccess);
+    cudaStream_t stream;
+    cudaCheck(cudaStreamCreate(&stream));
+
+    {// longer version
+        auto devBuffer = BufferT::create(hostHandle.buffer(), dev, stream);
+        EXPECT_EQ(hostHandle.bufferSize(), devBuffer.size());
+        auto devHandle = GridHandle<BufferT>(std::move(devBuffer));
+
+        // testing
+        EXPECT_EQ(hostHandle.bufferSize(), devHandle.bufferSize());
+        EXPECT_EQ(devBuffer.size(), 0);
+        devHandle.deviceDownload(stream);
+        for (uint64_t i=0; i<hostHandle.bufferSize(); ++i) {
+            EXPECT_EQ(*hostHandle.buffer().data<char>(i), *devHandle.buffer().data<char>(i));
+        }
+    }
+    {// compact version
+        auto devHandle = GridHandle<BufferT>(BufferT::create(hostHandle.buffer(), dev, stream));
+
+        // testing
+        EXPECT_EQ(hostHandle.bufferSize(), devHandle.bufferSize());
+        devHandle.deviceDownload(stream);
+        for (uint64_t i=0; i<hostHandle.bufferSize(); ++i) {
+            EXPECT_EQ(*hostHandle.buffer().data<char>(i), *devHandle.buffer().data<char>(i));
+        }
+    }
+}
+
