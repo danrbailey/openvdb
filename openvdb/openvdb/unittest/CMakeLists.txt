@@ -141,7 +141,6 @@ else()
     TestNodeManager.cc
     TestNodeMask.cc
     TestNodeVisitor.cc
-    TestPCA.cc
     TestParticleAtlas.cc
     TestParticlesToLevelSet.cc
     TestPointAdvect.cc

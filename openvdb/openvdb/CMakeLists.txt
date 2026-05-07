@@ -448,7 +448,6 @@ set(OPENVDB_LIBRARY_POINTS_INCLUDE_FILES
   points/PointScatter.h
   points/PointStatistics.h
   points/PointTransfer.h
-  points/PrincipalComponentAnalysis.h
   points/StreamCompression.h
 )
 
@@ -460,7 +459,6 @@ set(OPENVDB_LIBRARY_POINTS_IMPL_INCLUDE_FILES
   points/impl/PointGroupImpl.h
   points/impl/PointMaskImpl.h
   points/impl/PointMoveImpl.h
-  points/impl/PointRasterizeEllipsoidsSDFImpl.h
   points/impl/PointRasterizeFrustumImpl.h
   points/impl/PointRasterizeSDFImpl.h
   points/impl/PointRasterizeTrilinearImpl.h
@@ -468,7 +466,6 @@ set(OPENVDB_LIBRARY_POINTS_IMPL_INCLUDE_FILES
   points/impl/PointSampleImpl.h
   points/impl/PointScatterImpl.h
   points/impl/PointStatisticsImpl.h
-  points/impl/PrincipalComponentAnalysisImpl.h
 )
 
 set(OPENVDB_LIBRARY_TOOLS_INCLUDE_FILES
