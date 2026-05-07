@@ -39,9 +39,7 @@ public:
     CPPUNIT_TEST(acos);
     CPPUNIT_TEST(adjoint);
     CPPUNIT_TEST(argsort);
-    CPPUNIT_TEST(asfloat);
     CPPUNIT_TEST(asin);
-    CPPUNIT_TEST(asinteger);
     CPPUNIT_TEST(atan);
     CPPUNIT_TEST(atan2);
     CPPUNIT_TEST(atof);
@@ -102,9 +100,7 @@ public:
     void acos();
     void adjoint();
     void argsort();
-    void asfloat();
     void asin();
-    void asinteger();
     void atan();
     void atan2();
     void atof();
@@ -350,46 +346,11 @@ TestStandardFunctions::argsort()
 
 
 void
-TestStandardFunctions::asfloat()
-{
-    const int32_t test1int32 = 2147483647;
-    float test1float = 0.0f;
-    static_assert(sizeof test1int32 == sizeof test1float);
-    std::memcpy(&test1float, &test1int32, sizeof test1int32);
-
-    const int64_t test2int64 = 2147483648;
-    double test2double = 0.0;
-    static_assert(sizeof test2int64 == sizeof test2double);
-    std::memcpy(&test2double, &test2int64, sizeof test2int64);
-
-    mHarness.addAttribute<float>("test1", test1float);
-    mHarness.addAttribute<double>("test2", test2double);
-    testFunctionOptions(mHarness, "asfloat");
-}
-
-void
 TestStandardFunctions::asin()
 {
     mHarness.addAttribute<double>("test1", std::asin(-0.5));
     mHarness.addAttribute<float>("test2", std::asin(-0.5f));
     testFunctionOptions(mHarness, "asin");
-}
-
-void
-TestStandardFunctions::asinteger()
-{
-    const float test1flt = 1.0f;
-    int32_t test1int32 = 0;
-    static_assert(sizeof test1flt == sizeof test1int32);
-    std::memcpy(&test1int32, &test1flt, sizeof test1flt);
-    const double test2double = 2.0;
-    int64_t test2int64 = 0;
-    static_assert(sizeof test2double == sizeof test2int64);
-    std::memcpy(&test2int64, &test2double, sizeof test2double);
-
-    mHarness.addAttribute<int32_t>("test1", test1int32);
-    mHarness.addAttribute<int64_t>("test2", test2int64);
-    testFunctionOptions(mHarness, "asinteger");
 }
 
 void

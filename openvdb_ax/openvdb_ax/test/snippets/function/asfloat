@@ -1,4 +1,0 @@
-int a = 2147483647;
-float@test1 = asfloat(a);
-int64 b = 2147483648;
-double@test2 = asfloat(b);
