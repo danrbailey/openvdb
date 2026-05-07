@@ -482,7 +482,6 @@ set(OPENVDB_LIBRARY_TOOLS_INCLUDE_FILES
   tools/FindActiveValues.h
   tools/GridOperators.h
   tools/GridTransformer.h
-  tools/IOStats.h
   tools/Interpolation.h
   tools/LevelSetAdvect.h
   tools/LevelSetFilter.h
@@ -690,7 +689,6 @@ endif()
 if(OPENVDB_CORE_SHARED)
   target_include_directories(openvdb_shared
     PUBLIC ../ ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/openvdb
-      ${AppStats_ROOT}/include
     PRIVATE .
   )
 
