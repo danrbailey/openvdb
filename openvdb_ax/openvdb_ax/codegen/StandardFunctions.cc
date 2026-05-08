@@ -292,63 +292,6 @@ inline FunctionGroup::UniquePtr llvm_pow(const FunctionOptions& op)
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 
-// Bitwise
-
-inline FunctionGroup::UniquePtr axasinteger(const FunctionOptions& op)
-{
-    static auto generate =
-        [](const std::vector<llvm::Value*>& args,
-           llvm::IRBuilder<>& B) -> llvm::Value*
-    {
-        llvm::Value* value = args.front();
-        llvm::Type* type = value->getType();
-
-        if (type->isFloatTy()) return B.CreateBitCast(value, LLVMType<int32_t>::get(B.getContext()));
-        else if (type->isDoubleTy()) return B.CreateBitCast(value, LLVMType<int64_t>::get(B.getContext()));
-        return nullptr;
-    };
-
-    return FunctionBuilder("asinteger")
-        .addSignature<int32_t(float)>(generate)
-        .addSignature<int64_t(double)>(generate)
-        .setArgumentNames({"flt"})
-        .addFunctionAttribute(llvm::Attribute::ReadOnly)
-        .addFunctionAttribute(llvm::Attribute::NoUnwind)
-        .setConstantFold(op.mConstantFoldCBindings)
-        .setPreferredImpl(FunctionBuilder::IR)
-        .setDocumentation("Return the input bits as an integer of the same size.")
-        .get();
-}
-
-inline FunctionGroup::UniquePtr axasfloat(const FunctionOptions& op)
-{
-    static auto generate =
-        [](const std::vector<llvm::Value*>& args,
-           llvm::IRBuilder<>& B) -> llvm::Value*
-    {
-        llvm::Value* value = args.front();
-        llvm::Type* type = value->getType();
-
-        if (type->isIntegerTy(32)) return B.CreateBitCast(value, LLVMType<float>::get(B.getContext()));
-        else if (type->isIntegerTy(64)) return B.CreateBitCast(value, LLVMType<double>::get(B.getContext()));
-        return nullptr;
-    };
-
-    return FunctionBuilder("asfloat")
-        .addSignature<float(int32_t)>(generate)
-        .addSignature<double(int64_t)>(generate)
-        .setArgumentNames({"int"})
-        .addFunctionAttribute(llvm::Attribute::ReadOnly)
-        .addFunctionAttribute(llvm::Attribute::NoUnwind)
-        .setConstantFold(op.mConstantFoldCBindings)
-        .setPreferredImpl(FunctionBuilder::IR)
-        .setDocumentation("Return the input bits as an floating point value of the same size.")
-        .get();
-}
-
-///////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////
-
 // Math
 
 DEFINE_AX_C_FP_BINDING(cbrt, "Computes the cubic root of the input.")
@@ -3261,11 +3204,6 @@ void insertStandardFunctions(FunctionRegistry& registry,
     add("round", llvm_round);
     add("sin", llvm_sin);
     add("sqrt", llvm_sqrt);
-
-    // bitwise
-
-    add("asinteger", axasinteger);
-    add("asfloat", axasfloat);
 
     // math
 
