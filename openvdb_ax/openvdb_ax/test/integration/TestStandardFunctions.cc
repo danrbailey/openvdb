@@ -230,6 +230,38 @@ TEST_F(TestStandardFunctions, argsort)
     testFunctionOptions(mHarness, "argsort");
 }
 
+TEST_F(TestStandardFunctions, asfloat)
+{
+    const int32_t test1int32 = 2147483647;
+    float test1float = 0.0f;
+    static_assert(sizeof test1int32 == sizeof test1float);
+    std::memcpy(&test1float, &test1int32, sizeof test1int32);
+
+    const int64_t test2int64 = 2147483648;
+    double test2double = 0.0;
+    static_assert(sizeof test2int64 == sizeof test2double);
+    std::memcpy(&test2double, &test2int64, sizeof test2int64);
+
+    mHarness.addAttribute<float>("test1", test1float);
+    mHarness.addAttribute<double>("test2", test2double);
+    testFunctionOptions(mHarness, "asfloat");
+}
+
+TEST_F(TestStandardFunctions, asinteger)
+{
+    const float test1flt = 1.0f;
+    int32_t test1int32 = 0;
+    static_assert(sizeof test1flt == sizeof test1int32);
+    std::memcpy(&test1int32, &test1flt, sizeof test1flt);
+    const double test2double = 2.0;
+    int64_t test2int64 = 0;
+    static_assert(sizeof test2double == sizeof test2int64);
+    std::memcpy(&test2int64, &test2double, sizeof test2double);
+
+    mHarness.addAttribute<int32_t>("test1", test1int32);
+    mHarness.addAttribute<int64_t>("test2", test2int64);
+    testFunctionOptions(mHarness, "asinteger");
+}
 
 TEST_F(TestStandardFunctions, asin)
 {
