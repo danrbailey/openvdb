@@ -298,7 +298,7 @@ openvdb::FloatGrid::Ptr rasterSpheres(const openvdb::points::PointDataGrid& poin
     const FilterT& filter,
     hvdb::HoudiniInterrupter* boss)
 {
-    openvdb::points::SphereSettings<openvdb::TypeList<>, float, FilterT, hvdb::HoudiniInterrupter> settings;
+    openvdb::points::SphereSettings<openvdb::TypeList<>, float, FilterT> settings;
     settings.radiusScale = radiusScale;
     settings.radius = radiusAttributeName;
     settings.transform = sdfTransform;
@@ -320,7 +320,7 @@ openvdb::FloatGrid::Ptr rasterSmoothSpheres(const openvdb::points::PointDataGrid
     const FilterT& filter,
     hvdb::HoudiniInterrupter* boss)
 {
-    openvdb::points::SmoothSphereSettings<openvdb::TypeList<>, float, FilterT, hvdb::HoudiniInterrupter> settings;
+    openvdb::points::SmoothSphereSettings<openvdb::TypeList<>, float, FilterT> settings;
     settings.radiusScale = radiusScale;
     settings.radius = radiusAttributeName;
     settings.searchRadius = searchRadius;
@@ -345,7 +345,7 @@ openvdb::FloatGrid::Ptr rasterEllipsoids(const openvdb::points::PointDataGrid& p
     hvdb::HoudiniInterrupter* boss)
 {
     if (boss) boss->start("Stamping ellipsoids into surface");
-    openvdb::points::EllipsoidSettings<openvdb::TypeList<>, openvdb::Vec3f, FilterT, hvdb::HoudiniInterrupter> settings;
+    openvdb::points::EllipsoidSettings<openvdb::TypeList<>, openvdb::Vec3f, FilterT> settings;
     settings.interrupter = boss;
     settings.radiusScale = vectorRadiusScale;
     settings.halfband = halfBand;
@@ -589,7 +589,7 @@ SOP_OpenVDB_Particle_Surfacer::Cache::cookVDBSop(OP_Context& context)
                 s.allowedAnisotropyRatio = allowedStretch;
                 s.averagePositions = averagePositions;
                 s.nonAnisotropicStretch = dropletScale;
-                openvdb::points::pca<PointDataGrid, openvdb::points::NullFilter, hvdb::HoudiniInterrupter>(*pointsCopy, s, a, &boss);
+                openvdb::points::pca<PointDataGrid>(*pointsCopy, s, a);
                 openvdb::tree::LeafManager<openvdb::points::PointDataGrid::TreeType> manager(pointsCopy->tree());
                 // scale the stretch attribute by the radius attribute
                 if (hasPscale) {
