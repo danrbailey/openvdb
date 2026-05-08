@@ -297,22 +297,30 @@ inline FunctionGroup::UniquePtr llvm_pow(const FunctionOptions& op)
 inline FunctionGroup::UniquePtr axasinteger(const FunctionOptions& op)
 {
     static auto generate =
-        [](const std::vector<llvm::Value*>& args,
-           llvm::IRBuilder<>& B) -> llvm::Value*
+        [](const NativeArguments& args,
+           llvm::IRBuilder<>& B) -> Value
     {
-        llvm::Value* value = args.front();
-        llvm::Type* type = value->getType();
+        Value in = args[0].LoadIfPtr(B);
+        llvm::Type* type = in.GetUnderlyingType();
 
-        if (type->isFloatTy()) return B.CreateBitCast(value, LLVMType<int32_t>::get(B.getContext()));
-        else if (type->isDoubleTy()) return B.CreateBitCast(value, LLVMType<int64_t>::get(B.getContext()));
-        return nullptr;
+        if (type->isFloatTy()) {
+            llvm::Type* destTy = LLVMType<int32_t>::get(B.getContext());
+            return Value(B.CreateBitCast(in.GetValue(), destTy), destTy);
+        }
+        else if (type->isDoubleTy()) {
+            llvm::Type* destTy = LLVMType<int64_t>::get(B.getContext());
+            return Value(B.CreateBitCast(in.GetValue(), destTy), destTy);
+        }
+        return Value::Invalid();
     };
 
     return FunctionBuilder("asinteger")
         .addSignature<int32_t(float)>(generate)
         .addSignature<int64_t(double)>(generate)
         .setArgumentNames({"flt"})
+#if LLVM_VERSION_MAJOR <= 15
         .addFunctionAttribute(llvm::Attribute::ReadOnly)
+#endif
         .addFunctionAttribute(llvm::Attribute::NoUnwind)
         .setConstantFold(op.mConstantFoldCBindings)
         .setPreferredImpl(FunctionBuilder::IR)
@@ -323,22 +331,30 @@ inline FunctionGroup::UniquePtr axasinteger(const FunctionOptions& op)
 inline FunctionGroup::UniquePtr axasfloat(const FunctionOptions& op)
 {
     static auto generate =
-        [](const std::vector<llvm::Value*>& args,
-           llvm::IRBuilder<>& B) -> llvm::Value*
+        [](const NativeArguments& args,
+           llvm::IRBuilder<>& B) -> Value
     {
-        llvm::Value* value = args.front();
-        llvm::Type* type = value->getType();
+        Value in = args[0].LoadIfPtr(B);
+        llvm::Type* type = in.GetUnderlyingType();
 
-        if (type->isIntegerTy(32)) return B.CreateBitCast(value, LLVMType<float>::get(B.getContext()));
-        else if (type->isIntegerTy(64)) return B.CreateBitCast(value, LLVMType<double>::get(B.getContext()));
-        return nullptr;
+        if (type->isIntegerTy(32)) {
+            llvm::Type* destTy = LLVMType<float>::get(B.getContext());
+            return Value(B.CreateBitCast(in.GetValue(), destTy), destTy);
+        }
+        else if (type->isIntegerTy(64)) {
+            llvm::Type* destTy = LLVMType<double>::get(B.getContext());
+            return Value(B.CreateBitCast(in.GetValue(), destTy), destTy);
+        }
+        return Value::Invalid();
     };
 
     return FunctionBuilder("asfloat")
         .addSignature<float(int32_t)>(generate)
         .addSignature<double(int64_t)>(generate)
         .setArgumentNames({"int"})
+#if LLVM_VERSION_MAJOR <= 15
         .addFunctionAttribute(llvm::Attribute::ReadOnly)
+#endif
         .addFunctionAttribute(llvm::Attribute::NoUnwind)
         .setConstantFold(op.mConstantFoldCBindings)
         .setPreferredImpl(FunctionBuilder::IR)
