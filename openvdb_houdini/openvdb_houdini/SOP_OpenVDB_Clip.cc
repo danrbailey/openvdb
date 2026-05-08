@@ -498,25 +498,6 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
         ? static_cast<float>(evalFloat("far", 0, time))
         : static_cast<float>(cameraParms.myfar)) + padding[2];
 
-    OP_Node* thissop = cookparms()->getCwd();
-    UT_Matrix4R camera_to_sop;
-    OBJ_Node *meobj = thissop ? thissop->getCreator()->castToOBJNode() : 0;
-
-    mFrustum = hvdb::frustumTransformFromCamera(cameraParms, cameratosop,
-        /*offset=*/0.f, nearPlane, farPlane, /*voxelDepth=*/1.f, /*voxelCountX=*/100);
-
-    if (meobj) {
-        if (!camera->getRelativeTransform(*meobj, camera_to_sop, context)){
-            addTransformError(*camera, "relative");
-            addExtraInput(meobj, OP_INTEREST_DATA);
-        }
-    }
-    else {
-        if (!camera->getWorldTransform(camera_to_sop, context)){
-            addTransformError(*camera, "world");
-        }
-    }
-
     // Compute frustum transform, w.r.t window size
     GEO_PrimVolumeXform frustXform = GEO_PrimVolumeXform::cameraFrustum(
         cameraParms.focal,
@@ -537,7 +518,7 @@ SOP_OpenVDB_Clip::Cache::getFrustum(OP_Context& context)
         UT_BoundingRectR(
             evalFloat("winx", 0, time), evalFloat("winy", 0, time),
             evalFloat("winx", 1, time), evalFloat("winy", 1, time)),
-        camera_to_sop,
+        cameratosop,
         NULL);
 
     UT_Vector3R size = frustXform.computeSize();
