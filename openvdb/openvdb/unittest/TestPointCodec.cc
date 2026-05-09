@@ -5,6 +5,7 @@
 #include <openvdb/io/File.h>
 #include <openvdb/openvdb.h>
 #include <openvdb/tools/PointIndexGrid.h>
+#include <openvdb/points/PointConversion.h>
 #include <gtest/gtest.h>
 #include "util.h" // for unittest_util::genPoints
 
@@ -145,7 +146,7 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
     std::remove(codecPath.c_str());
 }
 
-TEST_F(TestCodec, testPointDataCodecIO)
+TEST_F(TestPointCodec, testPointDataCodecIO)
 {
     using namespace openvdb;
     using namespace openvdb::io;
