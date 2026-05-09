@@ -353,7 +353,7 @@ VRAY_OpenVDB_Points::initialize(const UT_BoundingBox *)
 {
     struct Local
     {
-        static GridVecPtr loadGrids(const std::string& filename, const bool stream)
+        static GridVecPtr loadGrids(const std::string& filename)
         {
             GridVecPtr grids;
 
@@ -369,11 +369,6 @@ VRAY_OpenVDB_Points::initialize(const UT_BoundingBox *)
                     if (baseGrid->isType<points::PointDataGrid>()) {
                         auto grid = StaticPtrCast<points::PointDataGrid>(file.readGrid(*iter));
                         assert(grid);
-                        if (stream) {
-                            // enable streaming mode to auto-collapse attributes
-                            // on read for improved memory efficiency
-                            points::setStreamingMode(grid->tree(), /*on=*/true);
-                        }
                         grids.push_back(grid);
                     }
                 }
@@ -391,8 +386,6 @@ VRAY_OpenVDB_Points::initialize(const UT_BoundingBox *)
 
     import("file", mFilename);
 
-    int streamData;
-    import("streamdata", &streamData, 1);
     import("attrmask", mAttrStr);
 
     float fps;
@@ -432,7 +425,7 @@ VRAY_OpenVDB_Points::initialize(const UT_BoundingBox *)
         }
     }
 
-    mGridPtrs = Local::loadGrids(mFilename.toStdString(), streamData ? true : false);
+    mGridPtrs = Local::loadGrids(mFilename.toStdString());
 
     // extract which groups to include and exclude
     UT_StringHolder groupStr;
@@ -448,11 +441,6 @@ VRAY_OpenVDB_Points::initialize(const UT_BoundingBox *)
         static_cast<float>(vdbBox.max().x()),
         static_cast<float>(vdbBox.max().y()),
         static_cast<float>(vdbBox.max().z()));
-
-    // if streaming the data, re-open the file now that the bounding box has been computed
-    if (streamData) {
-        mGridPtrs = Local::loadGrids(mFilename.toStdString(), true);
-    }
 
     return 1;
 }
