@@ -145,29 +145,33 @@ public:
     virtual Index64 memUsage() const { return 0; }
 
 
+#ifdef OPENVDB_ENABLE_TREE_IO
     //
     // I/O methods
     //
     /// @brief Read the tree topology from a stream.
     ///
     /// This will read the tree structure and tile values, but not voxel data.
-    virtual void readTopology(std::istream&, bool saveFloatAsHalf = false);
+    virtual void readTopology(std::istream&, bool saveFloatAsHalf = false) = OPENVDB_TREE_IO_VIRTUAL;
     /// @brief Write the tree topology to a stream.
     ///
     /// This will write the tree structure and tile values, but not voxel data.
-    virtual void writeTopology(std::ostream&, bool saveFloatAsHalf = false) const;
-
+    virtual void writeTopology(std::ostream&, bool saveFloatAsHalf = false) const = OPENVDB_TREE_IO_VIRTUAL;
     /// Read all data buffers for this tree.
-    virtual void readBuffers(std::istream&, bool saveFloatAsHalf = false) = 0;
+    virtual void readBuffers(std::istream&, bool saveFloatAsHalf = false) = OPENVDB_TREE_IO_VIRTUAL;
     /// Read all of this tree's data buffers that intersect the given bounding box.
-    virtual void readBuffers(std::istream&, const CoordBBox&, bool saveFloatAsHalf = false) = 0;
+    virtual void readBuffers(std::istream&, const CoordBBox&, bool saveFloatAsHalf = false) = OPENVDB_TREE_IO_VIRTUAL;
+#endif
 
 #if OPENVDB_ABI_VERSION_NUMBER < 14
     OPENVDB_DEPRECATED_MESSAGE("This method is deprecated and will be removed. Delayed loading is no longer supported.")
     virtual void readNonresidentBuffers() const = 0;
 #endif
+
+#ifdef OPENVDB_ENABLE_TREE_IO
     /// Write out all the data buffers for this tree.
-    virtual void writeBuffers(std::ostream&, bool saveFloatAsHalf = false) const = 0;
+    virtual void writeBuffers(std::ostream&, bool saveFloatAsHalf = false) const = OPENVDB_TREE_IO_VIRTUAL;
+#endif
 
     /// @brief Print statistics, memory usage and other information about this tree.
     /// @param os            a stream to which to write textual information
@@ -320,6 +324,7 @@ public:
     //
     // I/O methods
     //
+#ifdef OPENVDB_ENABLE_TREE_IO
     /// @brief Read the tree topology from a stream.
     ///
     /// This will read the tree structure and tile values, but not voxel data.
@@ -332,6 +337,7 @@ public:
     void readBuffers(std::istream&, bool saveFloatAsHalf = false) override;
     /// Read all of this tree's data buffers that intersect the given bounding box.
     void readBuffers(std::istream&, const CoordBBox&, bool saveFloatAsHalf = false) override;
+#endif // OPENVDB_ENABLE_TREE_IO
 
 #if OPENVDB_ABI_VERSION_NUMBER < 14
     OPENVDB_DEPRECATED_MESSAGE("This method is deprecated and will be removed. Delayed loading is no longer supported.")
@@ -339,7 +345,9 @@ public:
 #endif
 
     /// Write out all data buffers for this tree.
+#ifdef OPENVDB_ENABLE_TREE_IO
     void writeBuffers(std::ostream&, bool saveFloatAsHalf = false) const override;
+#endif // OPENVDB_ENABLE_TREE_IO
 
     void print(std::ostream& os = std::cout, int verboseLevel = 1) const override;
 
@@ -1131,23 +1139,6 @@ struct Tree5 {
 
 
 inline void
-TreeBase::readTopology(std::istream& is, bool /*saveFloatAsHalf*/)
-{
-    int32_t bufferCount;
-    is.read(reinterpret_cast<char*>(&bufferCount), sizeof(int32_t));
-    if (bufferCount != 1) OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
-}
-
-
-inline void
-TreeBase::writeTopology(std::ostream& os, bool /*saveFloatAsHalf*/) const
-{
-    int32_t bufferCount = 1;
-    os.write(reinterpret_cast<char*>(&bufferCount), sizeof(int32_t));
-}
-
-
-inline void
 TreeBase::print(std::ostream& os, int /*verboseLevel*/) const
 {
     os << "    Tree Type: " << type()
@@ -1267,13 +1258,16 @@ Tree<RootNodeType>::cbegin() const
 
 ////////////////////////////////////////
 
+#ifdef OPENVDB_ENABLE_TREE_IO
 
 template<typename RootNodeType>
 void
 Tree<RootNodeType>::readTopology(std::istream& is, bool saveFloatAsHalf)
 {
     this->clearAllAccessors();
-    TreeBase::readTopology(is, saveFloatAsHalf);
+    int32_t bufferCount;
+    is.read(reinterpret_cast<char*>(&bufferCount), sizeof(int32_t));
+    if (bufferCount != 1) OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
     mRoot.readTopology(is, saveFloatAsHalf);
 }
 
@@ -1282,7 +1276,8 @@ template<typename RootNodeType>
 void
 Tree<RootNodeType>::writeTopology(std::ostream& os, bool saveFloatAsHalf) const
 {
-    TreeBase::writeTopology(os, saveFloatAsHalf);
+    int32_t bufferCount = 1;
+    os.write(reinterpret_cast<char*>(&bufferCount), sizeof(int32_t));
     mRoot.writeTopology(os, saveFloatAsHalf);
 }
 
@@ -1312,6 +1307,7 @@ Tree<RootNodeType>::writeBuffers(std::ostream &os, bool saveFloatAsHalf) const
     mRoot.writeBuffers(os, saveFloatAsHalf);
 }
 
+#endif // OPENVDB_ENABLE_TREE_IO
 
 template<typename RootNodeType>
 template<typename ArrayT>

@@ -82,6 +82,7 @@ else()
     TestAttributeSet.cc
     TestBBox.cc
     TestClip.cc
+    TestCodec.cc
     TestConjGradient.cc
     TestCoord.cc
     TestCount.cc
@@ -147,6 +148,7 @@ else()
     TestParticlesToLevelSet.cc
     TestPointAdvect.cc
     TestPointAttribute.cc
+    TestPointCodec.cc
     TestPointConversion.cc
     TestPointCount.cc
     TestPointDataLeaf.cc

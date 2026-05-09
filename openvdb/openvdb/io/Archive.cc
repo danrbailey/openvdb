@@ -384,6 +384,35 @@ Archive::copy() const
 }
 
 
+void
+Archive::enableReadDiagnostics()
+{
+    mReadDiagnostics.enable();
+}
+
+
+void
+Archive::disableReadDiagnostics()
+{
+    mReadDiagnostics.disable();
+    mReadDiagnostics.clear();
+}
+
+
+const ReadDiagnostics&
+Archive::readDiagnostics() const
+{
+    return mReadDiagnostics;
+}
+
+
+void
+Archive::clearReadDiagnostics()
+{
+    mReadDiagnostics.clear();
+}
+
+
 ////////////////////////////////////////
 
 
@@ -855,6 +884,31 @@ Archive::readGridCount(std::istream& is)
 ////////////////////////////////////////
 
 
+io::Codec*
+Archive::findCodec(const std::string& gridType, const io::ReadOptions& options)
+{
+    // Determine the I/O codec to use to read this grid
+    auto codec = io::CodecRegistry::get(gridType);
+
+    // if readMode is Half, then search for a codec that converts
+    // from the storage grid type to the grid type
+    if (options.readMode == ReadMode::Half) {
+        codec = io::CodecRegistry::get(gridType + "_to_half");
+    }
+    if (options.readMode == ReadMode::Bool) {
+        codec = io::CodecRegistry::get(gridType + "_to_bool");
+    }
+    if (options.readMode == ReadMode::Mask) {
+        codec = io::CodecRegistry::get(gridType + "_to_mask");
+    }
+
+    return codec;
+}
+
+
+////////////////////////////////////////
+
+
 void
 Archive::connectInstance(const GridDescriptor& gd, const NamedGridMap& grids) const
 {
@@ -887,7 +941,7 @@ Archive::connectInstance(const GridDescriptor& gd, const NamedGridMap& grids) co
 
 
 GridBase::Ptr
-Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions)
+Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics)
 {
     // Read the compression settings for this grid and tag the stream with them
     // so that downstream functions can reference them.
@@ -902,15 +956,26 @@ Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOpti
     };
     OnExit restore(is);
 
-    // Create the grid.
-    if (!GridBase::isRegistered(gd.gridType())) {
-        OPENVDB_THROW(KeyError, "Cannot read grid "
-            << GridDescriptor::nameAsString(gd.uniqueName())
-            << ": grid type " << gd.gridType() << " is not registered");
-    }
+    // Find the codec for the grid type and options.
+    io::Codec* codec = findCodec(gd.gridType(), readOptions);
 
-    GridBase::Ptr grid = GridBase::createGrid(gd.gridType());
-    if (grid) grid->setSaveFloatAsHalf(gd.saveFloatAsHalf());
+    GridBase::Ptr grid;
+    io::CodecData::Ptr codecData;
+
+    // Create the grid.
+    if (codec) {
+        codecData = codec->createData();
+        if (codecData->grid)    grid = codecData->grid;
+    } else {
+        if (!GridBase::isRegistered(gd.gridType())) {
+            OPENVDB_THROW(KeyError, "Cannot read grid "
+                << GridDescriptor::nameAsString(gd.uniqueName())
+                << ": grid type " << gd.gridType() << " is not registered");
+        }
+
+        grid = GridBase::createGrid(gd.gridType());
+    }
+    grid->setSaveFloatAsHalf(gd.saveFloatAsHalf());
 
     // Stream metadata varies per grid, and it needs to persist
     // in case delayed load is in effect.
@@ -940,18 +1005,44 @@ Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOpti
 
     grid->readTransform(is);
     if (readOptions.readMode != io::ReadMode::TopologyOnly && !gd.isInstance()) {
-        grid->readTopology(is);
-        const auto& worldBBox = readOptions.clipBBox;
-        const bool clip = worldBBox.isSorted();
-        if (clip) {
-            const auto indexBBox = grid->constTransform().worldToIndexNodeCentered(worldBBox);
-            grid->readBuffers(is, indexBBox);
+        // read topology
+        if (codec) {
+            codec->readTopology(is, *codecData, readOptions, diagnostics);
         } else {
-            grid->readBuffers(is);
+#ifdef OPENVDB_ENABLE_TREE_IO
+            grid->readTopology(is);
+#else
+            OPENVDB_THROW(IoError, "Tree I/O functionality is not enabled");
+#endif
+        }
+        // read buffers
+        if (codec) {
+            codec->readBuffers(is, *codecData, readOptions, diagnostics);
+        } else {
+#ifdef OPENVDB_ENABLE_TREE_IO
+            const auto& worldBBox = readOptions.clipBBox;
+            const bool clip = worldBBox.isSorted();
+            if (clip) {
+                const auto indexBBox = grid->constTransform().worldToIndexNodeCentered(worldBBox);
+                grid->readBuffers(is, indexBBox);
+            } else {
+                grid->readBuffers(is);
+            }
+#else
+            OPENVDB_THROW(IoError, "Tree I/O functionality is not enabled");
+#endif
         }
     }
 
     return grid;
+}
+
+
+GridBase::Ptr
+Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions)
+{
+    ReadDiagnostics nullDiagnostics;
+    return readGrid(gd, is, readOptions, nullDiagnostics);
 }
 
 
@@ -1065,7 +1156,7 @@ Archive::write(std::ostream& os, const GridCPtrVec& grids, bool seekable,
 
 void
 Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
-    std::ostream& os, bool seekable, const io::WriteOptions&) const
+    std::ostream& os, bool seekable, const io::WriteOptions& writeOptions) const
 {
     // Restore file-level stream metadata on exit.
     struct OnExit {
@@ -1075,6 +1166,9 @@ Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
         void* ptr;
     };
     OnExit restore(os);
+
+    // Find the codec for the grid type and options.
+    io::Codec* codec = findCodec(gd.gridType());
 
     // Stream metadata varies per grid, so make a copy of the file-level stream metadata.
     io::StreamMetadata::Ptr streamMetadata;
@@ -1119,13 +1213,29 @@ Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
     grid->writeTransform(os);
 
     // Save the grid's structure.
-    grid->writeTopology(os);
+    if (codec) {
+        codec->writeTopology(os, *grid, writeOptions);
+    } else {
+#ifdef OPENVDB_ENABLE_TREE_IO
+        grid->writeTopology(os);
+#else
+        OPENVDB_THROW(IoError, "Tree I/O functionality is not enabled");
+#endif
+    }
 
     // Now we know the grid block storage position.
     if (seekable) gd.setBlockPos(os.tellp());
 
     // Save out the data blocks of the grid.
-    grid->writeBuffers(os);
+    if (codec) {
+        codec->writeBuffers(os, *grid, writeOptions);
+    } else {
+#ifdef OPENVDB_ENABLE_TREE_IO
+        grid->writeBuffers(os);
+#else
+        OPENVDB_THROW(IoError, "Tree I/O functionality is not enabled");
+#endif
+    }
 
     // Now we know the end position of this grid.
     if (seekable) gd.setEndPos(os.tellp());
