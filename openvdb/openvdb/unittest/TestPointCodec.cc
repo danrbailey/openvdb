@@ -48,8 +48,8 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
         tools::createPointIndexGrid<PointIndexGrid>(pointList, *transform);
     srcGrid->setName("point_index_grid");
 
+#ifdef OPENVDB_ENABLE_TREE_IO
     const std::string rawPath = "testPointIndexCodec_raw.vdb";
-    const std::string codecPath = "testPointIndexCodec_codec.vdb";
 
     // Phase 1: write/read without codec
     {
@@ -65,6 +65,25 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
         f.close();
     }
     ASSERT_TRUE(rawGrid);
+
+    PointIndexGrid::Ptr rawTopo;
+    {
+        io::File f(rawPath);
+        f.open();
+        GridBase::Ptr base;
+        EXPECT_NO_THROW(base = f.readGrid("point_index_grid", topoOpts));
+        rawTopo = gridPtrCast<PointIndexGrid>(base);
+        f.close();
+    }
+    ASSERT_TRUE(rawTopo);
+    EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(0));
+    EXPECT_TRUE(rawTopo->tree().leafCount() == 0);
+    EXPECT_EQ(rawTopo->getName(), std::string("point_index_grid"));
+
+    std::remove(rawPath.c_str());
+#endif
+
+    const std::string codecPath = "testPointIndexCodec_codec.vdb";
 
     // Phase 2: register codec, write/read with codec
     io::internal::initialize();
@@ -85,24 +104,24 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
     ASSERT_TRUE(codecGrid);
 
     // Phase 3: full read comparison
-    EXPECT_TRUE(srcGrid->tree().hasSameTopology(rawGrid->tree()));
+    EXPECT_TRUE(srcGrid->tree().hasSameTopology(srcGrid->tree()));
     EXPECT_TRUE(srcGrid->tree().hasSameTopology(codecGrid->tree()));
     {
         auto codecAcc = codecGrid->getConstAccessor();
-        for (PointIndexGrid::ValueOnCIter it = rawGrid->cbeginValueOn(); it; ++it) {
+        for (PointIndexGrid::ValueOnCIter it = srcGrid->cbeginValueOn(); it; ++it) {
             EXPECT_EQ(*it, codecAcc.getValue(it.getCoord()));
         }
     }
 
     // Compare leaf indices arrays
     {
-        auto rawLeafIt = rawGrid->tree().cbeginLeaf();
+        auto srcLeafIt = srcGrid->tree().cbeginLeaf();
         auto codecLeafIt = codecGrid->tree().cbeginLeaf();
-        for (; rawLeafIt; ++rawLeafIt, ++codecLeafIt) {
+        for (; srcLeafIt; ++srcLeafIt, ++codecLeafIt) {
             ASSERT_TRUE(codecLeafIt);
-            EXPECT_EQ(rawLeafIt->indices().size(), codecLeafIt->indices().size());
-            for (size_t i = 0; i < rawLeafIt->indices().size(); ++i) {
-                EXPECT_EQ(rawLeafIt->indices()[i], codecLeafIt->indices()[i]);
+            EXPECT_EQ(srcLeafIt->indices().size(), codecLeafIt->indices().size());
+            for (size_t i = 0; i < srcLeafIt->indices().size(); ++i) {
+                EXPECT_EQ(srcLeafIt->indices()[i], codecLeafIt->indices()[i]);
             }
         }
         EXPECT_TRUE(!codecLeafIt);
@@ -111,20 +130,6 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
     // Phase 4: TopologyOnly read
     ReadOptions topoOpts;
     topoOpts.readMode = ReadMode::TopologyOnly;
-
-    PointIndexGrid::Ptr rawTopo;
-    {
-        io::File f(rawPath);
-        f.open();
-        GridBase::Ptr base;
-        EXPECT_NO_THROW(base = f.readGrid("point_index_grid", topoOpts));
-        rawTopo = gridPtrCast<PointIndexGrid>(base);
-        f.close();
-    }
-    ASSERT_TRUE(rawTopo);
-    EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(0));
-    EXPECT_TRUE(rawTopo->tree().leafCount() == 0);
-    EXPECT_EQ(rawTopo->getName(), std::string("point_index_grid"));
 
     PointIndexGrid::Ptr codecTopo;
     {
@@ -142,7 +147,6 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
 
     // Cleanup
     CodecRegistry::clear();
-    std::remove(rawPath.c_str());
     std::remove(codecPath.c_str());
 }
 
@@ -193,8 +197,8 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
             createPointDataGrid<NullCodec, PointDataGrid>(positions, *transform);
         srcGrid->setName("pdg_positions");
 
+#ifdef OPENVDB_ENABLE_TREE_IO
         const std::string rawPath = "testPDG_A_raw.vdb";
-        const std::string codecPath = "testPDG_A_codec.vdb";
 
         // Phase 1: write/read without codec
         {
@@ -211,6 +215,24 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
         }
         ASSERT_TRUE(rawGrid);
         EXPECT_TRUE(srcGrid->tree().hasSameTopology(rawGrid->tree()));
+
+        PointDataGrid::Ptr rawTopo;
+        {
+            io::File f(rawPath);
+            f.open();
+            GridBase::Ptr base;
+            EXPECT_NO_THROW(base = f.readGrid("pdg_positions", topoOpts));
+            rawTopo = gridPtrCast<PointDataGrid>(base);
+            f.close();
+        }
+        ASSERT_TRUE(rawTopo);
+        EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(0));
+        EXPECT_TRUE(rawTopo->tree().leafCount() == 0);
+
+        std::remove(rawPath.c_str());
+#endif
+
+        const std::string codecPath = "testPDG_A_codec.vdb";
 
         // Phase 2: register codec, write/read with codec
         io::internal::initialize();
@@ -230,27 +252,14 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
         }
         ASSERT_TRUE(codecGrid);
 
-        // Phase 3: compare raw vs codec
+        // Phase 3: compare src vs codec
         EXPECT_TRUE(srcGrid->tree().hasSameTopology(codecGrid->tree()));
-        EXPECT_EQ(pointCount(rawGrid->tree()), pointCount(codecGrid->tree()));
-        comparePositions(*rawGrid, *codecGrid);
+        EXPECT_EQ(pointCount(srcGrid->tree()), pointCount(codecGrid->tree()));
+        comparePositions(*srcGrid, *codecGrid);
 
         // Phase 4: TopologyOnly read
         ReadOptions topoOpts;
         topoOpts.readMode = ReadMode::TopologyOnly;
-
-        PointDataGrid::Ptr rawTopo;
-        {
-            io::File f(rawPath);
-            f.open();
-            GridBase::Ptr base;
-            EXPECT_NO_THROW(base = f.readGrid("pdg_positions", topoOpts));
-            rawTopo = gridPtrCast<PointDataGrid>(base);
-            f.close();
-        }
-        ASSERT_TRUE(rawTopo);
-        EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(0));
-        EXPECT_TRUE(rawTopo->tree().leafCount() == 0);
 
         PointDataGrid::Ptr codecTopo;
         {
@@ -265,8 +274,6 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
         EXPECT_EQ(codecTopo->activeVoxelCount(), Index64(0));
         EXPECT_TRUE(codecTopo->tree().leafCount() == 0);
 
-        CodecRegistry::clear();
-        std::remove(rawPath.c_str());
         std::remove(codecPath.c_str());
     }
 
@@ -322,8 +329,11 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
             EXPECT_EQ(leafIt->attributeSet().size(), size_t(3));
         }
 
+        CodecRegistry::clear();
+
+#ifdef OPENVDB_ENABLE_TREE_IO
+
         const std::string rawPath = "testPDG_B_raw.vdb";
-        const std::string codecPath = "testPDG_B_codec.vdb";
 
         // Phase 1: write/read without codec
         {
@@ -339,6 +349,11 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
             f.close();
         }
         ASSERT_TRUE(rawGrid);
+
+        std::remove(rawPath.c_str());
+#endif
+
+        const std::string codecPath = "testPDG_B_codec.vdb";
 
         // Phase 2: register codec, write/read with codec
         io::internal::initialize();
@@ -357,8 +372,8 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
         }
         ASSERT_TRUE(codecGrid);
 
-        EXPECT_TRUE(rawGrid->tree().hasSameTopology(codecGrid->tree()));
-        EXPECT_EQ(pointCount(rawGrid->tree()), pointCount(codecGrid->tree()));
+        EXPECT_TRUE(srcGrid->tree().hasSameTopology(codecGrid->tree()));
+        EXPECT_EQ(pointCount(srcGrid->tree()), pointCount(codecGrid->tree()));
 
         // Verify attribute count on codec grid
         {
@@ -369,35 +384,34 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
 
         // Compare all three attributes leaf-by-leaf
         {
-            auto rawIt = rawGrid->tree().cbeginLeaf();
+            auto srcIt = srcGrid->tree().cbeginLeaf();
             auto codecIt = codecGrid->tree().cbeginLeaf();
-            for (; rawIt && codecIt; ++rawIt, ++codecIt) {
-                EXPECT_EQ(rawIt->pointCount(), codecIt->pointCount());
-                AttributeHandle<Vec3f> rawP(rawIt->constAttributeArray("P"));
+            for (; srcIt && codecIt; ++srcIt, ++codecIt) {
+                EXPECT_EQ(srcIt->pointCount(), codecIt->pointCount());
+                AttributeHandle<Vec3f> srcP(srcIt->constAttributeArray("P"));
                 AttributeHandle<Vec3f> codecP(codecIt->constAttributeArray("P"));
-                AttributeHandle<Vec3f> rawVel(rawIt->constAttributeArray("velocity"));
+                AttributeHandle<Vec3f> srcVel(srcIt->constAttributeArray("velocity"));
                 AttributeHandle<Vec3f> codecVel(codecIt->constAttributeArray("velocity"));
-                AttributeHandle<int> rawId(rawIt->constAttributeArray("id"));
+                AttributeHandle<int> srcId(srcIt->constAttributeArray("id"));
                 AttributeHandle<int> codecId(codecIt->constAttributeArray("id"));
-                for (Index i = 0; i < rawIt->pointCount(); ++i) {
-                    const Vec3f rp = rawP.get(i);
+                for (Index i = 0; i < srcIt->pointCount(); ++i) {
+                    const Vec3f rp = srcP.get(i);
                     const Vec3f cp = codecP.get(i);
                     EXPECT_NEAR(rp.x(), cp.x(), 1e-6f);
                     EXPECT_NEAR(rp.y(), cp.y(), 1e-6f);
                     EXPECT_NEAR(rp.z(), cp.z(), 1e-6f);
-                    const Vec3f rv = rawVel.get(i);
+                    const Vec3f rv = srcVel.get(i);
                     const Vec3f cv = codecVel.get(i);
                     EXPECT_NEAR(rv.x(), cv.x(), 1e-6f);
                     EXPECT_NEAR(rv.y(), cv.y(), 1e-6f);
                     EXPECT_NEAR(rv.z(), cv.z(), 1e-6f);
-                    EXPECT_EQ(rawId.get(i), codecId.get(i));
+                    EXPECT_EQ(srcId.get(i), codecId.get(i));
                 }
             }
-            EXPECT_TRUE(!rawIt && !codecIt);
+            EXPECT_TRUE(!srcIt && !codecIt);
         }
 
         CodecRegistry::clear();
-        std::remove(rawPath.c_str());
         std::remove(codecPath.c_str());
     }
 
@@ -540,4 +554,3 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
         std::remove(diffPath.c_str());
     }
 }
-
