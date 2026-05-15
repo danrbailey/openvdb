@@ -266,12 +266,16 @@ TEST_F(TestCodec, testFloatToHalfCodecConversion)
     using namespace openvdb;
     using namespace openvdb::io;
 
+    openvdb::initialize();
+    CodecRegistry::clear();
+
     // Verify the conversion codec name
     const std::string expectedName = FloatGrid::gridType() + "_to_half";
     EXPECT_EQ((codecs::ScalarCodec<HalfGrid, FloatGrid, CodecMode::ReadOnly>::name()),
               expectedName);
 
-    // Verify the codec is registered
+    // Verify the codec is registered after initialize()
+    io::internal::initialize();
     EXPECT_TRUE(CodecRegistry::isRegistered(expectedName));
 
     // Write a FloatGrid with a known fill value (1.5f is exactly representable in half)

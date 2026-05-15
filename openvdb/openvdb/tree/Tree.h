@@ -144,8 +144,6 @@ public:
     /// Return the total amount of memory in bytes occupied by this tree.
     virtual Index64 memUsage() const { return 0; }
 
-
-#ifdef OPENVDB_ENABLE_TREE_IO
     //
     // I/O methods
     //
@@ -161,17 +159,14 @@ public:
     virtual void readBuffers(std::istream&, bool saveFloatAsHalf = false) = OPENVDB_TREE_IO_VIRTUAL;
     /// Read all of this tree's data buffers that intersect the given bounding box.
     virtual void readBuffers(std::istream&, const CoordBBox&, bool saveFloatAsHalf = false) = OPENVDB_TREE_IO_VIRTUAL;
-#endif
 
 #if OPENVDB_ABI_VERSION_NUMBER < 14
     OPENVDB_DEPRECATED_MESSAGE("This method is deprecated and will be removed. Delayed loading is no longer supported.")
-    virtual void readNonresidentBuffers() const = 0;
+    virtual void readNonresidentBuffers() const = OPENVDB_TREE_IO_VIRTUAL;
 #endif
 
-#ifdef OPENVDB_ENABLE_TREE_IO
     /// Write out all the data buffers for this tree.
     virtual void writeBuffers(std::ostream&, bool saveFloatAsHalf = false) const = OPENVDB_TREE_IO_VIRTUAL;
-#endif
 
     /// @brief Print statistics, memory usage and other information about this tree.
     /// @param os            a stream to which to write textual information
@@ -337,7 +332,6 @@ public:
     void readBuffers(std::istream&, bool saveFloatAsHalf = false) override;
     /// Read all of this tree's data buffers that intersect the given bounding box.
     void readBuffers(std::istream&, const CoordBBox&, bool saveFloatAsHalf = false) override;
-#endif // OPENVDB_ENABLE_TREE_IO
 
 #if OPENVDB_ABI_VERSION_NUMBER < 14
     OPENVDB_DEPRECATED_MESSAGE("This method is deprecated and will be removed. Delayed loading is no longer supported.")
@@ -345,7 +339,6 @@ public:
 #endif
 
     /// Write out all data buffers for this tree.
-#ifdef OPENVDB_ENABLE_TREE_IO
     void writeBuffers(std::ostream&, bool saveFloatAsHalf = false) const override;
 #endif // OPENVDB_ENABLE_TREE_IO
 
@@ -1457,7 +1450,7 @@ Tree<RootNodeType>::releaseAllAccessors()
     }
     mAccessorRegistry.clear();
 
-    mConstAccessorRegistry.erase(nullptr);
+    mAccessorRegistry.erase(nullptr);
     for (typename ConstAccessorRegistry::iterator it = mConstAccessorRegistry.begin();
         it != mConstAccessorRegistry.end(); ++it)
     {

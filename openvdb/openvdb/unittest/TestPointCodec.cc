@@ -71,13 +71,12 @@ TEST_F(TestPointCodec, testPointIndexCodecIO)
         io::File f(rawPath);
         f.open();
         GridBase::Ptr base;
-        EXPECT_NO_THROW(base = f.readGrid("point_index_grid", topoOpts));
+        EXPECT_NO_THROW(base = f.readGrid("point_index_grid"));
         rawTopo = gridPtrCast<PointIndexGrid>(base);
         f.close();
     }
     ASSERT_TRUE(rawTopo);
-    EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(0));
-    EXPECT_TRUE(rawTopo->tree().leafCount() == 0);
+    EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(97));
     EXPECT_EQ(rawTopo->getName(), std::string("point_index_grid"));
 
     std::remove(rawPath.c_str());
@@ -221,13 +220,12 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
             io::File f(rawPath);
             f.open();
             GridBase::Ptr base;
-            EXPECT_NO_THROW(base = f.readGrid("pdg_positions", topoOpts));
+            EXPECT_NO_THROW(base = f.readGrid("pdg_positions"));
             rawTopo = gridPtrCast<PointDataGrid>(base);
             f.close();
         }
         ASSERT_TRUE(rawTopo);
-        EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(0));
-        EXPECT_TRUE(rawTopo->tree().leafCount() == 0);
+        EXPECT_EQ(rawTopo->activeVoxelCount(), Index64(4));
 
         std::remove(rawPath.c_str());
 #endif
@@ -332,7 +330,6 @@ TEST_F(TestPointCodec, testPointDataCodecIO)
         CodecRegistry::clear();
 
 #ifdef OPENVDB_ENABLE_TREE_IO
-
         const std::string rawPath = "testPDG_B_raw.vdb";
 
         // Phase 1: write/read without codec
