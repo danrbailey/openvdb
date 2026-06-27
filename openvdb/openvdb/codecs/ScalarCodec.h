@@ -150,13 +150,19 @@ struct ScalarCodec final: public TopologyCodec<GridT, StorageGridT, Mode>
         }
     }
 
-    void readBuffers(std::istream& is, io::CodecData& data, const io::ReadOptions& options, io::ReadDiagnostics&) final
+    void readBuffers(std::istream& is, int64_t size, io::CodecData& data, const io::ReadOptions& options, io::ReadDiagnostics&) const final
     {
         GridT& grid = static_cast<GridT&>(*data.grid);
+
+        if (options.readMode == io::ReadMode::TopologyOnly) {
+            internal::setTilesToBackground(grid.tree());
+            return;
+        }
+
         internal::scalarCodecReadBuffers<GridT, StorageGridT>(grid, is, options);
     }
 
-    void writeBuffers(std::ostream& os, const GridBase& gridBase, const io::WriteOptions&) final
+    void writeBuffers(std::ostream& os, const GridBase& gridBase, const io::WriteOptions&) const final
     {
         if constexpr (Mode == io::CodecMode::ReadOnly) return;
 

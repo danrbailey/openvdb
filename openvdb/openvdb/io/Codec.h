@@ -164,15 +164,48 @@ struct OPENVDB_API ReadOptions
     /// Values are @c ReadTypedOptions subclass instances; use
     /// @c ReadTypedOptions::cast<T>() to retrieve the concrete type.
     std::unordered_map<std::string, ReadTypedOptions::Ptr> typeData;
+
+    /// Upper bound on the number of threads a codec may use when decompressing
+    /// value buffers. A non-positive value (the default) lets the codec pick
+    /// its own concurrency. Codecs clamp this to the range
+    /// @c [1, hardware_concurrency].
+    int decompressThreads = 0;
 }; // struct ReadOptions
+
+/// @brief Controls how grid sections are ordered within a serialized VDB file.
+///
+/// @li @c Legacy — each grid is written contiguously - header, then topology,
+///   then value buffers.  Compatible with all existing readers.
+/// @li @c Interleaved — all grid headers are written first, followed by all
+///   topology sections, followed by all value-buffer sections. Because
+///   decompression, memory allocation, and I/O for later sections can be
+///   overlapped when reading multiple grids, this layout typically yields
+///   significantly faster multi-grid load times.
+/// @li @c Contiguous — all grid headers, topology, and value buffers are written
+///   contiguously, with no separation between sections. This is primarily to
+///   support appending grids to an existing file and is not as performant as
+///   interleaved.
+enum class WriteLayout {
+    Legacy,
+    Interleaved,
+    Contiguous
+};
 
 /// @brief Global write configuration passed to every codec during serialization.
 ///
-/// Currently carries no fields, but is provided for forward compatibility:
-/// future write-time options (e.g. compression hints, metadata policies) can
-/// be added here without changing the codec interface.
+/// Passed by const-reference through the write methods so that all codecs
+/// share the same options without requiring per-codec overloads.
+///
+/// @see WriteLayout for a description of the available file-layout strategies.
 struct OPENVDB_API WriteOptions
 {
+    /// Layout strategy for the output file. Defaults to @c Legacy for
+    /// backwards compatibility, prefer @c Interleaved for new files when
+    /// fast multi-grid loads are desired.
+    WriteLayout layout = WriteLayout::Legacy;
+
+    /// Whether to compress the data. Defaults to @c true.
+    bool compression = true;
 }; // struct WriteOptions
 
 /// @brief Severity level for a read diagnostic.
@@ -239,6 +272,9 @@ private:
     mutable std::mutex mMutex;
 }; // struct ReadDiagnostics
 
+/// Forward declaration of the Codec class
+struct Codec;
+
 /// @brief Mutable per-operation state created by @c Codec::createData() and
 ///   passed into every read and write call on a given codec.
 ///
@@ -289,6 +325,8 @@ struct OPENVDB_API CodecData
 
     virtual ~CodecData() = default;
 
+    /// The codec used to read/write the grid
+    Codec* codec = nullptr;
     /// The grid being populated on read, or being serialized on write.
     SharedPtr<GridBase> grid;
 }; // struct CodecData
@@ -349,7 +387,7 @@ struct OPENVDB_API CodecData
 ///        // Deserialize the tree structure into grid...
 ///    }
 ///
-///    void readBuffers(std::istream& is, io::CodecData& data,
+///    void readBuffers(std::istream& is, int64_t size, CodecData& data,
 ///                     const io::ReadOptions& options,
 ///                     io::ReadDiagnostics& diagnostics) override
 ///    {
@@ -390,7 +428,7 @@ struct OPENVDB_API Codec
     /// @brief Deserialize the grid topology (tree structure and active-voxel
     ///   mask) from @a is into the grid held by @a data.
     virtual void readTopology(std::istream& /*is*/, CodecData& /*data*/,
-        const ReadOptions& /*options*/, ReadDiagnostics& /*diagnostics*/) { }
+        const ReadOptions& /*options*/, ReadDiagnostics& /*diagnostics*/) const { }
 
     /// @brief Deserialize all voxel-value buffers from @a is into the grid
     ///   held by @a data.
@@ -403,8 +441,8 @@ struct OPENVDB_API Codec
     /// restrict the loaded data to the region that intersects it; if the codec
     /// cannot honour clipping natively, fall back to a post-process and record
     /// a warning via @a diagnostics.
-    virtual void readBuffers(std::istream& /*is*/, CodecData& /*data*/,
-        const ReadOptions& /*options*/, ReadDiagnostics& /*diagnostics*/) { }
+    virtual void readBuffers(std::istream& /*is*/, int64_t /*size*/, CodecData& /*data*/,
+        const ReadOptions& /*options*/, ReadDiagnostics& /*diagnostics*/) const { }
 
     /// @brief Serialize the grid topology (tree structure and active-voxel
     ///   mask) from @a grid to @a os.
@@ -413,14 +451,14 @@ struct OPENVDB_API Codec
     /// topology as a distinct section that precedes the value buffers in the
     /// stream.
     virtual void writeTopology(std::ostream& /*os*/, const GridBase& /*grid*/,
-        const WriteOptions& /*options*/) { }
+        const WriteOptions& /*options*/) const { }
 
     /// @brief Serialize all voxel-value buffers from @a grid to @a os.
     ///
     /// The default implementation is a no-op. Override to write the leaf-node
     /// value buffers that follow the topology section.
     virtual void writeBuffers(std::ostream& /*os*/, const GridBase& /*grid*/,
-        const WriteOptions& /*options*/) { }
+        const WriteOptions& /*options*/) const { }
 }; // struct Codec
 
 /// @brief A thread-safe, process-global registry that maps codec names to

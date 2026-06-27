@@ -262,6 +262,11 @@ const uint32_t OPENVDB_ABI_VERSION = OPENVDB_ABI_VERSION_NUMBER;
 /// or to reject files that cannot be read.
 const uint32_t OPENVDB_FILE_VERSION = 225;
 
+/// @brief The maximum version number of the VDB file format
+/// @details This can be used to reject files that are too new to be read.
+/// @hideinitializer
+const uint32_t OPENVDB_MAX_FILE_VERSION = 300;
+
 /// Notable file format version numbers
 enum {
     OPENVDB_FILE_VERSION_ROOTNODE_MAP = 213,
@@ -278,7 +283,8 @@ enum {
     OPENVDB_FILE_VERSION_BLOSC_COMPRESSION = 223,
     OPENVDB_FILE_VERSION_POINT_INDEX_GRID = 223,
     OPENVDB_FILE_VERSION_MULTIPASS_IO = 224,
-    OPENVDB_FILE_VERSION_HALF_GRID = 225
+    OPENVDB_FILE_VERSION_HALF_GRID = 225,
+    OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT = 300
 };
 
 

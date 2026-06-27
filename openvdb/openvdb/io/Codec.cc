@@ -14,6 +14,13 @@
 namespace openvdb {
 OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
+
+namespace codecs {
+namespace internal {
+    void registerCompactCodecs();
+} // namespace internal
+} // namespace codecs
+
 namespace io {
 
 namespace {
@@ -68,6 +75,8 @@ void initialize()
 
     // register the plugin that converts from float to half
     CodecRegistry::registerCodec<codecs::ScalarCodec<HalfGrid, FloatGrid, CodecMode::ReadOnly>>();
+
+    codecs::internal::registerCompactCodecs();
 }
 
 void uninitialize()

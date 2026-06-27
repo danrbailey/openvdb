@@ -5,6 +5,7 @@
 #define OPENVDB_IO_GRIDDESCRIPTOR_HAS_BEEN_INCLUDED
 
 #include <openvdb/Grid.h>
+#include <openvdb/io/Codec.h>
 #include <iostream>
 #include <string>
 
@@ -35,6 +36,21 @@ public:
 
     bool saveFloatAsHalf() const { return mSaveFloatAsHalf; }
 
+    void setCodecName(const Name& codecName) { mCodecName = codecName; }
+    const Name& codecName() const { return mCodecName; }
+
+    void setOffsetPos(int64_t pos) { mOffsetPos = pos; }
+    int64_t getOffsetPos() const { return mOffsetPos; }
+
+    void setTopologyPos(int64_t pos) { mGridPos = pos; }
+    int64_t getTopologyPos() const { return mGridPos; }
+
+    void setDataPos(int64_t pos) { mBlockPos = pos; }
+    int64_t getDataPos() const { return mBlockPos; }
+
+    void seekToTopology(std::istream&) const;
+    void seekToBuffers(std::istream&) const;
+
     void setGridPos(int64_t pos) { mGridPos = pos; }
     int64_t getGridPos() const { return mGridPos; }
 
@@ -55,7 +71,7 @@ public:
 
     /// @brief Write out this descriptor's header information (all data except for
     /// stream offsets).
-    void writeHeader(std::ostream&) const;
+    void writeHeader(std::ostream&, bool codec = false) const;
 
     /// @brief Since positions into the stream are known at a later time, they are
     /// written out separately.
@@ -63,7 +79,7 @@ public:
 
     /// @brief Read this descriptor's header information (all data except for
     /// stream offsets) from the given stream.
-    void readHeader(std::istream&);
+    void readHeader(std::istream&, bool codec = false);
 
     /// @brief Read stream positions (grid, block, and end offsets) from the
     /// given stream.
@@ -100,12 +116,16 @@ private:
     Name mGridType;
     /// Are floats quantized to 16 bits on disk?
     bool mSaveFloatAsHalf;
+    /// The name of the codec used to read/write the grid
+    Name mCodecName;
+    /// Location in the stream where the grid descriptor's offset information is stored
+    int64_t mOffsetPos = -1;
     /// Location in the stream where the grid data is stored
-    int64_t mGridPos;
+    int64_t mGridPos = -1;
     /// Location in the stream where the grid blocks are stored
-    int64_t mBlockPos;
+    int64_t mBlockPos = -1;
     /// Location in the stream where the next grid descriptor begins
-    int64_t mEndPos;
+    int64_t mEndPos = -1;
 };
 
 } // namespace io

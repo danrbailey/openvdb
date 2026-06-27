@@ -4,11 +4,15 @@
 /// @file io/File.cc
 
 #include "File.h"
+#include "ThrottledStreamBuf.h"
 
 #include <openvdb/Exceptions.h>
 #include <openvdb/util/logging.h>
 #include <openvdb/util/Assert.h>
+#include <openvdb/util/CpuTimer.h>
 #include <cstdint>
+
+#include <zstd.h>
 
 #include <sys/stat.h> // stat()
 
@@ -18,6 +22,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <vector>
 
 
 namespace openvdb {
@@ -26,18 +31,23 @@ namespace OPENVDB_VERSION_NAME {
 namespace io {
 
 
-File::File(const std::string& filename)
+File::File(const std::string& filename, int maximumBandwidth)
     : Archive()
     , mFilename(filename)
+    , mMaxBandwidth(maximumBandwidth)
 {
-    setInputHasGridOffsets(true);
+    setInputHasGridOffsetsAtStart(true);
 }
+
+
+File::~File() = default;
 
 
 File::File(const File& other)
     : Archive(other)
     , mFilename(other.mFilename)
     , mMeta(other.mMeta)
+    , mMaxBandwidth(other.mMaxBandwidth)
     , mIsOpen(false)
     , mGridDescriptors(other.mGridDescriptors)
     , mNamedGrids(other.mNamedGrids)
@@ -53,6 +63,7 @@ File::operator=(const File& other)
         Archive::operator=(other);
         mFilename = other.mFilename;
         mMeta = other.mMeta;
+        mMaxBandwidth = other.mMaxBandwidth;
         mIsOpen = false; // don't want two file objects reading from the same stream
         mGridDescriptors = other.mGridDescriptors;
         mNamedGrids = other.mNamedGrids;
@@ -174,14 +185,28 @@ File::open()
         OPENVDB_THROW(IoError, mFilename << " is already open");
     }
     mInStream.reset();
+    mThrottledBuf.reset();
+    mUnderlyingStream.reset();
+    mIOTimeMilliseconds = 0.0;
 
     // Open the file using standard I/O (delayed loading has been removed)
-    std::unique_ptr<std::istream> newStream;
-    newStream.reset(new std::ifstream(
-        mFilename.c_str(), std::ios_base::in | std::ios_base::binary));
+    auto fileStream = std::make_unique<std::ifstream>(
+        mFilename.c_str(), std::ios_base::in | std::ios_base::binary);
 
-    if (newStream->fail()) {
+    if (fileStream->fail()) {
         OPENVDB_THROW(IoError, "could not open file " << mFilename);
+    }
+
+    // If a maximum read bandwidth was requested, wrap the file's stream buffer
+    // in a throttling buffer that also records the time spent blocked on I/O.
+    std::unique_ptr<std::istream> newStream;
+    if (mMaxBandwidth > 0) {
+        mThrottledBuf = std::make_unique<ThrottledStreamBuf>(
+            fileStream->rdbuf(), static_cast<double>(mMaxBandwidth) * 1.0e6);
+        mUnderlyingStream = std::move(fileStream); // keep the file alive
+        newStream = std::make_unique<std::istream>(mThrottledBuf.get());
+    } else {
+        newStream = std::move(fileStream);
     }
 
     // Read in the file header.
@@ -207,47 +232,131 @@ File::open()
     Archive::setLibraryVersion(inputStream());
     Archive::setDataCompression(inputStream());
 
-    // Read in the VDB metadata.
+    const bool interleavedLayout = fileVersion() >= OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT;
+
+    // Read in the VDB metadata and grid count.
     mMeta = MetaMap::Ptr(new MetaMap);
-    mMeta->readMeta(inputStream());
+    int32_t gridCount = 0;
 
-    if (!inputHasGridOffsets()) {
-        OPENVDB_LOG_DEBUG_RUNTIME("file " << mFilename << " does not support partial reading");
+    if (interleavedLayout) {
+        // Decompress the zstd-compressed metadata + grid count block.
+        uint64_t uncompressedSize = 0, compressedSize = 0;
+        inputStream().read(reinterpret_cast<char*>(&uncompressedSize), sizeof(uint64_t));
+        inputStream().read(reinterpret_cast<char*>(&compressedSize), sizeof(uint64_t));
 
-        mGrids.reset(new GridPtrVec);
-        mNamedGrids.clear();
+        // The stored buffer has the 4-byte zstd magic number stripped;
+        // prepend it before decompression.
+        static constexpr size_t kZstdMagicSize = 4;
+        static constexpr uint32_t kZstdMagicNumber = 0xFD2FB528;
 
-        // Stream in the entire contents of the file and append all grids to mGrids.
-        const int32_t gridCount = readGridCount(inputStream());
-        for (int32_t i = 0; i < gridCount; ++i) {
-            GridDescriptor gd;
-            gd.readHeader(inputStream());
-            gd.readStreamPos(inputStream());
+        std::vector<char> compressedBuf(kZstdMagicSize + compressedSize);
+        std::memcpy(compressedBuf.data(), &kZstdMagicNumber, kZstdMagicSize);
+        inputStream().read(compressedBuf.data() + kZstdMagicSize, compressedSize);
 
-            GridBase::Ptr grid = Archive::readGrid(gd, inputStream(), io::ReadOptions{});
-
-            mGridDescriptors.insert(std::make_pair(gd.gridName(), gd));
-            mGrids->push_back(grid);
-            mNamedGrids[gd.uniqueName()] = grid;
+        std::vector<char> uncompressedBuf(uncompressedSize);
+        const size_t decompSize = ZSTD_decompress(
+            uncompressedBuf.data(), uncompressedSize,
+            compressedBuf.data(), kZstdMagicSize + compressedSize);
+        if (ZSTD_isError(decompSize)) {
+            OPENVDB_THROW(IoError, "zstd decompression of metadata failed: "
+                << ZSTD_getErrorName(decompSize));
         }
-        // Connect instances (grids that share trees with other grids).
-        for (NameMapCIter it = mGridDescriptors.begin(); it != mGridDescriptors.end(); ++it) {
-            Archive::connectInstance(it->second, mNamedGrids);
-        }
-    } else {
+
+        std::istringstream localStream(
+            std::string(uncompressedBuf.data(), uncompressedSize),
+            std::ios_base::binary);
+        // Propagate version/compression metadata onto localStream so that
+        // checkFormatVersion() and setDataCompression() work correctly when
+        // called by gd.readHeader() and Archive::readGridHeader() below.
+        Archive::setFormatVersion(localStream);
+        Archive::setLibraryVersion(localStream);
+        Archive::setDataCompression(localStream);
+        mMeta->readMeta(localStream);
+        localStream.read(reinterpret_cast<char*>(&gridCount), sizeof(int32_t));
+
+        mInterleavedGrids.clear();
         mGridDescriptors.clear();
 
-        for (int32_t i = 0, N = readGridCount(inputStream()); i < N; ++i) {
-            // Read the grid descriptor.
+        for (int32_t i = 0; i < gridCount; ++i) {
             GridDescriptor gd;
-            gd.readHeader(inputStream());
-            gd.readStreamPos(inputStream());
+            gd.readHeader(localStream, /*codec=*/true);
 
-            // Add the descriptor to the dictionary.
-            mGridDescriptors.insert(std::make_pair(gd.gridName(), gd));
+            io::CodecData::Ptr codecData = Archive::readGridHeader(
+                gd, localStream, io::ReadOptions{}, mReadDiagnostics);
 
-            // Skip forward to the next descriptor.
-            gd.seekToEnd(inputStream());
+            auto it = mGridDescriptors.insert({gd.gridName(), gd});
+            mInterleavedGrids.emplace_back(it, std::move(codecData));
+        }
+
+        int64_t currentPos = inputStream().tellg();
+
+        // If the file does not have grid offsets at the start, read the last integer in the file
+        // as the offset of the offset table then seek to the offset table and read the offsets.
+        inputStream().seekg(-static_cast<std::streamoff>(sizeof(int64_t)), std::ios_base::end);
+        int64_t trailingOffset = 0;
+        inputStream().read(reinterpret_cast<char*>(&trailingOffset), sizeof(int64_t));
+        inputStream().seekg(trailingOffset);
+
+        // Read in the grid offset table.
+        for (auto& [gridName, gd] : mGridDescriptors) {
+            if (gd.isInstance()) continue;
+            int64_t topologyPos = 0;
+            int64_t dataPos = 0;
+            int64_t endPos = 0;
+            inputStream().read(reinterpret_cast<char*>(&topologyPos), sizeof(int64_t));
+            inputStream().read(reinterpret_cast<char*>(&dataPos), sizeof(int64_t));
+            inputStream().read(reinterpret_cast<char*>(&endPos), sizeof(int64_t));
+            gd.setTopologyPos(topologyPos);
+            gd.setDataPos(dataPos);
+            gd.setEndPos(endPos);
+        }
+
+        // Return to the original position.
+        inputStream().seekg(currentPos);
+    } else {
+        mMeta->readMeta(inputStream());
+        gridCount = readGridCount(inputStream());
+
+        if (!inputHasGridOffsetsAtStart()) {
+            OPENVDB_LOG_DEBUG_RUNTIME("file " << mFilename << " does not support partial reading");
+
+            mGrids.reset(new GridPtrVec);
+            mNamedGrids.clear();
+
+            // Stream in the entire contents of the file and append all grids to mGrids.
+            // Note: no stream positions were written (seekable=false), so do not call readStreamPos().
+            for (int32_t i = 0; i < gridCount; ++i) {
+                GridDescriptor gd;
+                gd.readHeader(inputStream(), /*codec=*/false);
+
+                io::CodecData::Ptr codecData = Archive::readGridHeader(gd, inputStream(), io::ReadOptions{}, mReadDiagnostics);
+                Archive::readGridTopology(codecData, gd, inputStream(), io::ReadOptions{}, mReadDiagnostics);
+                Archive::readGridBuffers(codecData, gd, inputStream(), io::ReadOptions{}, mReadDiagnostics);
+                GridBase::Ptr grid = codecData->grid;
+
+                mGridDescriptors.insert(std::make_pair(gd.gridName(), gd));
+                mGrids->push_back(grid);
+                mNamedGrids[gd.uniqueName()] = grid;
+            }
+            // Connect instances (grids that share trees with other grids).
+            for (NameMapCIter it = mGridDescriptors.begin(); it != mGridDescriptors.end(); ++it) {
+                Archive::connectInstance(it->second, mNamedGrids);
+            }
+        } else {
+            mGridDescriptors.clear();
+
+            for (int32_t i = 0, N = gridCount; i < N; ++i) {
+                // Read the grid descriptor.
+                GridDescriptor gd;
+                gd.readHeader(inputStream(), /*codec=*/false);
+                gd.readStreamPos(inputStream());
+
+                // Add the descriptor to the dictionary.
+                mGridDescriptors.insert(std::make_pair(gd.gridName(), gd));
+
+                // Skip forward to the next descriptor.
+                gd.seekToEnd(inputStream());
+            }
         }
     }
 
@@ -259,16 +368,32 @@ File::open()
 void
 File::close()
 {
+    // Cache the accumulated I/O time before destroying the throttling buffer,
+    // so that readIOTimeMilliseconds() remains valid after close().
+    if (mThrottledBuf) {
+        mIOTimeMilliseconds = mThrottledBuf->readTimeMilliseconds();
+    }
+
     // Reset all data.
     mMeta.reset();
+    mInterleavedGrids.clear(); // clear before mGridDescriptors (iterators point into it)
     mGridDescriptors.clear();
     mGrids.reset();
     mNamedGrids.clear();
     mInStream.reset();
+    mThrottledBuf.reset();
+    mUnderlyingStream.reset();
     mStreamMetadata.reset();
 
     mIsOpen = false;
-    setInputHasGridOffsets(true);
+    setInputHasGridOffsetsAtStart(true);
+}
+
+
+double
+File::readIOTimeMilliseconds() const
+{
+    return mThrottledBuf ? mThrottledBuf->readTimeMilliseconds() : mIOTimeMilliseconds;
 }
 
 
@@ -304,31 +429,75 @@ File::getGrids(const io::ReadOptions& readOptions) const
         OPENVDB_THROW(IoError, mFilename << " is not open for reading");
     }
 
+    const bool interleavedLayout = fileVersion() >= OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT;
+
     GridPtrVecPtr ret;
-    if (!inputHasGridOffsets()) {
-        // If the input file doesn't have grid offsets, then all of the grids
-        // have already been streamed in and stored in mGrids.
+    if (!inputHasGridOffsetsAtStart() && !interleavedLayout) {
+        // Legacy non-seekable: all grids already streamed in and stored in mGrids.
         ret = mGrids;
     } else {
         ret.reset(new GridPtrVec);
 
         Archive::NamedGridMap namedGrids;
 
-        // Read all grids represented by the GridDescriptors.
-        for (NameMapCIter i = mGridDescriptors.begin(), e = mGridDescriptors.end(); i != e; ++i) {
-            const GridDescriptor& gd = i->second;
-            // Seek to the grid in the file.
-            gd.seekToGrid(inputStream());
-            GridBase::Ptr grid = Archive::readGrid(gd, inputStream(), readOptions, mReadDiagnostics);
-            ret->push_back(grid);
-            namedGrids[gd.uniqueName()] = grid;
-        }
+        if (interleavedLayout) {
+            // Mint fresh CodecData for each grid from the stored templates,
+            // so multiple getGrids() calls are independent.
+            std::vector<std::pair<NameMapCIter, io::CodecData::Ptr>> work;
+            work.reserve(mInterleavedGrids.size());
+            for (const auto& [it, tmpl] : mInterleavedGrids) {
+                const GridDescriptor& gd = it->second;
+                io::CodecData::Ptr fresh;
+                if (tmpl && tmpl->codec) {
+                    fresh = tmpl->codec->createData();
+                    fresh->codec = tmpl->codec;
+                    // copyGridWithNewTree preserves metadata + transform, empty tree.
+                    fresh->grid = tmpl->grid->copyGridWithNewTree();
+                    fresh->grid->setSaveFloatAsHalf(gd.saveFloatAsHalf());
+                }
+                work.emplace_back(it, std::move(fresh));
+            }
 
-        // Connect instances (grids that share trees with other grids).
-        for (NameMapCIter i = mGridDescriptors.begin(), e = mGridDescriptors.end(); i != e; ++i) {
-            Archive::connectInstance(i->second, namedGrids);
+            for (auto& [it, codecData] : work) {
+                const GridDescriptor& gd = it->second;
+                gd.seekToTopology(inputStream());
+                Archive::readGridTopology(codecData, gd, inputStream(),
+                    readOptions, mReadDiagnostics);
+            }
+            for (auto& [it, codecData] : work) {
+                const GridDescriptor& gd = it->second;
+                gd.seekToBuffers(inputStream());
+                Archive::readGridBuffers(codecData, gd, inputStream(),
+                    readOptions, mReadDiagnostics);
+                ret->push_back(codecData->grid);
+                namedGrids[gd.uniqueName()] = codecData->grid;
+            }
+
+            // Connect instances (grids that share trees with other grids).
+            for (const auto& [it, tmpl] : mInterleavedGrids) {
+                Archive::connectInstance(it->second, namedGrids);
+            }
+        } else {
+            // Read all grids represented by the GridDescriptors.
+            for (NameMapCIter i = mGridDescriptors.begin(), e = mGridDescriptors.end(); i != e; ++i) {
+                const GridDescriptor& gd = i->second;
+                // Seek to the grid in the file.
+                gd.seekToGrid(inputStream());
+                io::CodecData::Ptr codecData = Archive::readGridHeader(gd, inputStream(), readOptions, mReadDiagnostics);
+                Archive::readGridTopology(codecData, gd, inputStream(), readOptions, mReadDiagnostics);
+                gd.seekToBlocks(inputStream());
+                Archive::readGridBuffers(codecData, gd, inputStream(), readOptions, mReadDiagnostics);
+                ret->push_back(codecData->grid);
+                namedGrids[gd.uniqueName()] = codecData->grid;
+            }
+
+            // Connect instances (grids that share trees with other grids).
+            for (NameMapCIter i = mGridDescriptors.begin(), e = mGridDescriptors.end(); i != e; ++i) {
+                Archive::connectInstance(i->second, namedGrids);
+            }
         }
     }
+
     return ret;
 }
 
@@ -338,7 +507,7 @@ File::retrieveCachedGrid(const Name& name) const
 {
     // If the file has grid offsets, grids are read on demand
     // and not cached in mNamedGrids.
-    if (inputHasGridOffsets()) return GridBase::Ptr();
+    if (inputHasGridOffsetsAtStart()) return GridBase::Ptr();
 
     // If the file does not have grid offsets, mNamedGrids should already
     // contain the entire contents of the file.
@@ -372,27 +541,24 @@ File::readAllGridMetadata()
 
     GridPtrVecPtr ret(new GridPtrVec);
 
-    if (!inputHasGridOffsets()) {
-        // If the input file doesn't have grid offsets, then all of the grids
-        // have already been streamed in and stored in mGrids.
+    const bool interleavedLayout = fileVersion() >= OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT;
+    if (!inputHasGridOffsetsAtStart() && !interleavedLayout) {
+        // Legacy non-seekable: all grids already streamed in and stored in mGrids.
         for (size_t i = 0, N = mGrids->size(); i < N; ++i) {
-            // Return copies of the grids, but with empty trees.
             ret->push_back((*mGrids)[i]->copyGridWithNewTree());
         }
+    } else if (interleavedLayout) {
+        // Interleaved: metadata + transform are already in the mInterleavedGrids templates.
+        for (const auto& [tmplIt, tmpl] : mInterleavedGrids) {
+            ret->push_back(tmpl->grid->copyGridWithNewTree());
+        }
     } else {
-        // Read just the metadata and transforms for all grids.
+        // Legacy seekable: seek to each grid and read just the header.
         for (NameMapCIter i = mGridDescriptors.begin(), e = mGridDescriptors.end(); i != e; ++i) {
             const GridDescriptor& gd = i->second;
-            // Seek to the grid in the file.
             gd.seekToGrid(inputStream());
-            io::ReadOptions readOptions;
-            readOptions.readMode = io::ReadMode::TopologyOnly;
-            GridBase::ConstPtr grid = Archive::readGrid(gd, inputStream(), readOptions);
-            // Return copies of the grids, but with empty trees.
-            // (As of 0.98.0, at least, it would suffice to just const cast
-            // the grid pointers returned by readGrid(partial=true), but shallow
-            // copying the grids helps to ensure future compatibility.)
-            ret->push_back(grid->copyGridWithNewTree());
+            io::CodecData::Ptr codecData = Archive::readGridHeader(gd, inputStream(), io::ReadOptions{}, mReadDiagnostics);
+            ret->push_back(codecData->grid->copyGridWithNewTree());
         }
     }
     return ret;
@@ -411,25 +577,30 @@ File::readGridMetadata(const Name& name)
             "VDB file version < 221 (FLOAT_FRUSTUM_BBOX) is no longer supported.");
     }
 
-    GridBase::ConstPtr ret;
-    if (!inputHasGridOffsets()) {
-        // Retrieve the grid from mGrids, which should already contain
-        // the entire contents of the file.
-        ret = readGrid(name);
-    } else {
-        NameMapCIter it = findDescriptor(name);
-        if (it == mGridDescriptors.end()) {
-            OPENVDB_THROW(KeyError, mFilename << " has no grid named \"" << name << "\"");
-        }
-
-        // Seek to and read in the grid from the file.
-        const GridDescriptor& gd = it->second;
-        gd.seekToGrid(inputStream());
-        io::ReadOptions readOptions;
-        readOptions.readMode = io::ReadMode::TopologyOnly;
-        ret = Archive::readGrid(gd, inputStream(), readOptions);
+    const bool interleavedLayout = fileVersion() >= OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT;
+    if (!inputHasGridOffsetsAtStart() && !interleavedLayout) {
+        // Legacy non-seekable: use the cached grid from mNamedGrids.
+        return readGrid(name)->copyGridWithNewTree();
     }
-    return ret->copyGridWithNewTree();
+
+    NameMapCIter it = findDescriptor(name);
+    if (it == mGridDescriptors.end()) {
+        OPENVDB_THROW(KeyError, mFilename << " has no grid named \"" << name << "\"");
+    }
+
+    if (interleavedLayout) {
+        // Interleaved: metadata + transform are already in the mInterleavedGrids template.
+        for (const auto& [tmplIt, tmpl] : mInterleavedGrids) {
+            if (tmplIt == it) return tmpl->grid->copyGridWithNewTree();
+        }
+        OPENVDB_THROW(KeyError, mFilename << " has no grid named \"" << name << "\"");
+    }
+
+    // Legacy seekable: seek to grid and read just the header.
+    const GridDescriptor& gd = it->second;
+    gd.seekToGrid(inputStream());
+    io::CodecData::Ptr codecData = Archive::readGridHeader(gd, inputStream(), io::ReadOptions{}, mReadDiagnostics);
+    return codecData->grid->copyGridWithNewTree();
 }
 
 
@@ -452,18 +623,20 @@ File::readGrid(const Name& name, const io::ReadOptions& readOptions)
         OPENVDB_THROW(IoError, mFilename << " is not open for reading.");
     }
 
-    // If a grid with the given name was already read and cached
-    // (along with the entire contents of the file, because the file
-    // doesn't support random access), retrieve and return it.
-    GridBase::Ptr grid = retrieveCachedGrid(name);
-    if (grid) {
-        const auto& bbox = readOptions.clipBBox;
-        const bool clip = bbox.isSorted();
-        if (clip) {
-            grid = grid->deepCopyGrid();
-            grid->clipGrid(bbox);
+    const bool interleavedLayout = fileVersion() >= OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT;
+
+    GridBase::Ptr grid;
+    if (!interleavedLayout) {
+        // For Legacy, use the cache for non-seekable files (mNamedGrids was populated during open()).
+        grid = retrieveCachedGrid(name);
+        if (grid) {
+            const auto& bbox = readOptions.clipBBox;
+            if (bbox.isSorted()) {
+                grid = grid->deepCopyGrid();
+                grid->clipGrid(bbox);
+            }
+            return grid;
         }
-        return grid;
     }
 
     NameMapCIter it = findDescriptor(name);
@@ -471,13 +644,42 @@ File::readGrid(const Name& name, const io::ReadOptions& readOptions)
         OPENVDB_THROW(KeyError, mFilename << " has no grid named \"" << name << "\"");
     }
 
-    // Seek to and read in the grid from the file.
     const GridDescriptor& gd = it->second;
-    // This method should not be called for files that don't contain grid offsets.
-    OPENVDB_ASSERT(inputHasGridOffsets());
-    // Seek to the grid in the file.
+
+    if (interleavedLayout) {
+        // Interleaved: the grid header (metadata + transform) was decoded from the compressed
+        // block during open() and lives in mInterleavedGrids. Works for both seekable and
+        // non-seekable files (offset table was read from either the inline or trailing position).
+        for (const auto& [tmplIt, tmpl] : mInterleavedGrids) {
+            if (tmplIt != it) continue;
+            io::CodecData::Ptr codecData = tmpl->codec->createData();
+            codecData->codec = tmpl->codec;
+            codecData->grid = tmpl->grid->copyGridWithNewTree();
+            codecData->grid->setSaveFloatAsHalf(gd.saveFloatAsHalf());
+            if (!gd.isInstance()) {
+                gd.seekToTopology(inputStream());
+                Archive::readGridTopology(codecData, gd, inputStream(), readOptions, mReadDiagnostics);
+                gd.seekToBuffers(inputStream());
+                Archive::readGridBuffers(codecData, gd, inputStream(), readOptions, mReadDiagnostics);
+            }
+            GridBase::Ptr grid = codecData->grid;
+            const auto& bbox = readOptions.clipBBox;
+            if (bbox.isSorted()) {
+                grid = grid->deepCopyGrid();
+                grid->clipGrid(bbox);
+            }
+            return grid;
+        }
+        OPENVDB_THROW(KeyError, mFilename << " has no grid named \"" << name << "\"");
+    }
+
+    // Legacy seekable: grid header is in the main stream at gd.gridPos.
+    OPENVDB_ASSERT(inputHasGridOffsetsAtStart());
     gd.seekToGrid(inputStream());
-    grid = Archive::readGrid(gd, inputStream(), readOptions, mReadDiagnostics);
+    io::CodecData::Ptr codecData = Archive::readGridHeader(gd, inputStream(), readOptions, mReadDiagnostics);
+    Archive::readGridTopology(codecData, gd, inputStream(), readOptions, mReadDiagnostics);
+    Archive::readGridBuffers(codecData, gd, inputStream(), readOptions, mReadDiagnostics);
+    grid = codecData->grid;
 
     if (gd.isInstance()) {
         /// @todo Refactor to share code with Archive::connectInstance()?
@@ -491,9 +693,11 @@ File::readGrid(const Name& name, const io::ReadOptions& readOptions)
         }
 
         GridBase::Ptr parent;
-        OPENVDB_ASSERT(inputHasGridOffsets());
         parentIt->second.seekToGrid(inputStream());
-        parent = Archive::readGrid(parentIt->second, inputStream(), readOptions, mReadDiagnostics);
+        io::CodecData::Ptr parentCodecData = Archive::readGridHeader(parentIt->second, inputStream(), readOptions, mReadDiagnostics);
+        Archive::readGridTopology(parentCodecData, parentIt->second, inputStream(), readOptions, mReadDiagnostics);
+        Archive::readGridBuffers(parentCodecData, parentIt->second, inputStream(), readOptions, mReadDiagnostics);
+        parent = parentCodecData->grid;
         if (parent) grid->setTree(parent->baseTreePtr());
     }
     return grid;

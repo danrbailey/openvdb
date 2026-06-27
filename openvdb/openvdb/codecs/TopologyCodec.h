@@ -284,11 +284,6 @@ void topologyCodecReadTopology(GridBase& gridBase, std::istream& is, const io::R
 
     internal::ReadTopologyOp<typename GridT::TreeType, typename StorageGridT::TreeType> readTopologyOp(is, grid.saveFloatAsHalf(), diagnostics, grid.getName());
     readTopologyOp(grid.tree().root());
-
-    if (options.readMode == io::ReadMode::TopologyOnly) {
-        internal::setTilesToBackground(grid.tree());
-        return;
-    }
 }
 
 // Free-standing function for write case (no StorageGridT needed)
@@ -319,12 +314,12 @@ struct TopologyCodec : public io::Codec
     }
 
     void readTopology(std::istream& is, io::CodecData& data, const io::ReadOptions& options,
-        io::ReadDiagnostics& diagnostics) final
+        io::ReadDiagnostics& diagnostics) const final
     {
         internal::topologyCodecReadTopology<GridT, StorageGridT>(*data.grid, is, options, diagnostics);
     }
 
-    void writeTopology(std::ostream& os, const GridBase& gridBase, const io::WriteOptions&) final
+    void writeTopology(std::ostream& os, const GridBase& gridBase, const io::WriteOptions&) const final
     {
         // disable implementation when read only
         if constexpr (Mode == io::CodecMode::ReadOnly) return;

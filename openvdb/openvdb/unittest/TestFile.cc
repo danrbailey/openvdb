@@ -140,7 +140,13 @@ TestFile::testWriteGrid()
     GridDescriptor gd(Name("temperature"), grid->type());
 
     // Write out the grid.
-    file.writeGrid(gd, grid, ostr, /*seekable=*/true);
+    {
+        auto [codecName, codec] = Archive::findCodec(gd.gridType());
+        gd.setCodecName(codecName);
+        file.writeGridHeader(gd, grid, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd, codec, grid, ostr);
+        file.writeGridBuffers(gd, codec, grid, ostr, /*seekable=*/true);
+    }
 
     EXPECT_TRUE(gd.getGridPos() != 0);
     EXPECT_TRUE(gd.getBlockPos() != 0);
@@ -158,7 +164,11 @@ TestFile::testWriteGrid()
     gd2.readHeader(istr);
     gd2.readStreamPos(istr);
 
-    GridBase::Ptr gd2_grid = Archive::readGrid(gd2, istr);
+    io::ReadDiagnostics diag1;
+    io::CodecData::Ptr codecData1 = file.readGridHeader(gd2, istr, io::ReadOptions{}, diag1);
+    file.readGridTopology(codecData1, gd2, istr, io::ReadOptions{}, diag1);
+    file.readGridBuffers(codecData1, gd2, istr, io::ReadOptions{}, diag1);
+    GridBase::Ptr gd2_grid = codecData1->grid;
 
     // Delay load metadata should not exist.
     ASSERT_FALSE(bool((*gd2_grid)["file_delayed_load"]));
@@ -225,8 +235,20 @@ TestFile::testWriteMultipleGrids()
     GridDescriptor gd2(Name("density"), grid2->type());
 
     // Write out the grids.
-    file.writeGrid(gd, grid, ostr, /*seekable=*/true);
-    file.writeGrid(gd2, grid2, ostr, /*seekable=*/true);
+    {
+        auto [codecName, codec] = Archive::findCodec(gd.gridType());
+        gd.setCodecName(codecName);
+        file.writeGridHeader(gd, grid, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd, codec, grid, ostr);
+        file.writeGridBuffers(gd, codec, grid, ostr, /*seekable=*/true);
+    }
+    {
+        auto [codecName, codec] = Archive::findCodec(gd2.gridType());
+        gd2.setCodecName(codecName);
+        file.writeGridHeader(gd2, grid2, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd2, codec, grid2, ostr);
+        file.writeGridBuffers(gd2, codec, grid2, ostr, /*seekable=*/true);
+    }
 
     EXPECT_TRUE(gd.getGridPos() != 0);
     EXPECT_TRUE(gd.getBlockPos() != 0);
@@ -244,7 +266,11 @@ TestFile::testWriteMultipleGrids()
     gd_in.readHeader(istr);
     gd_in.readStreamPos(istr);
 
-    GridBase::Ptr gd_in_grid = Archive::readGrid(gd_in, istr);
+    io::ReadDiagnostics diagA;
+    io::CodecData::Ptr codecDataA = file.readGridHeader(gd_in, istr, io::ReadOptions{}, diagA);
+    file.readGridTopology(codecDataA, gd_in, istr, io::ReadOptions{}, diagA);
+    file.readGridBuffers(codecDataA, gd_in, istr, io::ReadOptions{}, diagA);
+    GridBase::Ptr gd_in_grid = codecDataA->grid;
 
     // Ensure read in the right values.
     EXPECT_EQ(gd.gridName(), gd_in.gridName());
@@ -281,7 +307,11 @@ TestFile::testWriteMultipleGrids()
     GridDescriptor gd2_in;
     gd2_in.readHeader(istr);
     gd2_in.readStreamPos(istr);
-    GridBase::Ptr gd2_in_grid = Archive::readGrid(gd2_in, istr);
+    io::ReadDiagnostics diagB;
+    io::CodecData::Ptr codecDataB = file.readGridHeader(gd2_in, istr, io::ReadOptions{}, diagB);
+    file.readGridTopology(codecDataB, gd2_in, istr, io::ReadOptions{}, diagB);
+    file.readGridBuffers(codecDataB, gd2_in, istr, io::ReadOptions{}, diagB);
+    GridBase::Ptr gd2_in_grid = codecDataB->grid;
 
     // Ensure that we read in the right values.
     EXPECT_EQ(gd2.gridName(), gd2_in.gridName());
@@ -594,8 +624,20 @@ TestFile::testReadGridDescriptors()
     int32_t gridCount = 2;
     ostr.write(reinterpret_cast<char*>(&gridCount), sizeof(int32_t));
     // Write out the grids.
-    file.writeGrid(gd, grid, ostr, /*seekable=*/true);
-    file.writeGrid(gd2, grid2, ostr, /*seekable=*/true);
+    {
+        auto [codecName, codec] = Archive::findCodec(gd.gridType());
+        gd.setCodecName(codecName);
+        file.writeGridHeader(gd, grid, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd, codec, grid, ostr);
+        file.writeGridBuffers(gd, codec, grid, ostr, /*seekable=*/true);
+    }
+    {
+        auto [codecName, codec] = Archive::findCodec(gd2.gridType());
+        gd2.setCodecName(codecName);
+        file.writeGridHeader(gd2, grid2, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd2, codec, grid2, ostr);
+        file.writeGridBuffers(gd2, codec, grid2, ostr, /*seekable=*/true);
+    }
 
     // Read in the grid descriptors.
     File file2("something.vdb2");
@@ -851,8 +893,20 @@ TestFile::testEmptyGridIO()
     int32_t gridCount = 2;
     ostr.write(reinterpret_cast<char*>(&gridCount), sizeof(int32_t));
     // Write out the grids.
-    file.writeGrid(gd, grid, ostr, /*seekable=*/true);
-    file.writeGrid(gd2, grid2, ostr, /*seekable=*/true);
+    {
+        auto [codecName, codec] = Archive::findCodec(gd.gridType());
+        gd.setCodecName(codecName);
+        file.writeGridHeader(gd, grid, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd, codec, grid, ostr);
+        file.writeGridBuffers(gd, codec, grid, ostr, /*seekable=*/true);
+    }
+    {
+        auto [codecName, codec] = Archive::findCodec(gd2.gridType());
+        gd2.setCodecName(codecName);
+        file.writeGridHeader(gd2, grid2, ostr, /*seekable=*/true);
+        file.writeGridTopology(gd2, codec, grid2, ostr);
+        file.writeGridBuffers(gd2, codec, grid2, ostr, /*seekable=*/true);
+    }
 
     // Ensure that the block offset and the end offsets are equivalent.
     EXPECT_EQ(0, int(grid->baseTree().leafCount()));
@@ -887,7 +941,11 @@ TestFile::testEmptyGridIO()
     EXPECT_TRUE(it != file2.mGridDescriptors.end());
     GridDescriptor file2gd = it->second;
     file2gd.seekToGrid(istr);
-    GridBase::Ptr gd_grid = Archive::readGrid(file2gd, istr);
+    io::ReadDiagnostics diagC;
+    io::CodecData::Ptr codecDataC = file2.readGridHeader(file2gd, istr, io::ReadOptions{}, diagC);
+    file2.readGridTopology(codecDataC, file2gd, istr, io::ReadOptions{}, diagC);
+    file2.readGridBuffers(codecDataC, file2gd, istr, io::ReadOptions{}, diagC);
+    GridBase::Ptr gd_grid = codecDataC->grid;
     EXPECT_EQ(gd.gridName(), file2gd.gridName());
     EXPECT_TRUE(gd_grid.get() != nullptr);
     EXPECT_EQ(0, int(gd_grid->baseTree().leafCount()));
@@ -901,7 +959,11 @@ TestFile::testEmptyGridIO()
     EXPECT_TRUE(it != file2.mGridDescriptors.end());
     file2gd = it->second;
     file2gd.seekToGrid(istr);
-    gd_grid = Archive::readGrid(file2gd, istr);
+    io::ReadDiagnostics diagD;
+    io::CodecData::Ptr codecDataD = file2.readGridHeader(file2gd, istr, io::ReadOptions{}, diagD);
+    file2.readGridTopology(codecDataD, file2gd, istr, io::ReadOptions{}, diagD);
+    file2.readGridBuffers(codecDataD, file2gd, istr, io::ReadOptions{}, diagD);
+    gd_grid = codecDataD->grid;
     EXPECT_EQ(gd2.gridName(), file2gd.gridName());
     EXPECT_TRUE(gd_grid.get() != nullptr);
     EXPECT_EQ(0, int(gd_grid->baseTree().leafCount()));

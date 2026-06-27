@@ -337,7 +337,9 @@ configure_file(version.h.in openvdb/version.h)
 
 set(OPENVDB_LIBRARY_SOURCE_FILES
   Grid.cc
+  codecs/CompactScalarCodec.cc
   io/Archive.cc
+  io/BufferCompression.cc
   io/Codec.cc
   io/Compression.cc
   io/File.cc
@@ -381,6 +383,8 @@ set(OPENVDB_LIBRARY_CODECS_INCLUDE_FILES
   codecs/ScalarCodec.h
   codecs/TopologyCodec.h
   codecs/ValueMaskCodec.h
+  codecs/CompactScalarCodec.h
+  codecs/CompactTopologyCodec.h
 )
 
 set(OPENVDB_LIBRARY_CODECS_IMPL_INCLUDE_FILES
@@ -389,6 +393,7 @@ set(OPENVDB_LIBRARY_CODECS_IMPL_INCLUDE_FILES
 
 set(OPENVDB_LIBRARY_IO_INCLUDE_FILES
   io/Archive.h
+  io/BufferCompression.h
   io/Codec.h
   io/Compression.h
   io/File.h

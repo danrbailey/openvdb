@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 
 
 class TestFile;
@@ -113,8 +114,8 @@ public:
 protected:
     /// @brief Return @c true if the input stream contains grid offsets
     /// that allow for random access or partial reading.
-    bool inputHasGridOffsets() const { return mInputHasGridOffsets; }
-    void setInputHasGridOffsets(bool b) { mInputHasGridOffsets = b; }
+    bool inputHasGridOffsetsAtStart() const { return mInputHasGridOffsetsAtStart; }
+    void setInputHasGridOffsetsAtStart(bool b) { mInputHasGridOffsetsAtStart = b; }
 
     /// @brief Tag the given input stream with the input file format version number.
     ///
@@ -144,14 +145,17 @@ protected:
     static int32_t readGridCount(std::istream&);
 
     /// @brief Find the codec for the given grid type and options.
-    static io::Codec* findCodec(const std::string& gridType, const io::ReadOptions& options = io::ReadOptions{});
+    /// @return A pair of (codec name, codec pointer). Returns {"", nullptr} if no codec is found.
+    static std::pair<std::string, io::Codec*> findCodec(const std::string& gridType, const io::ReadOptions& options = io::ReadOptions{});
 
     /// @brief Read in and create the grid represented by the given grid descriptor using the
     /// given input stream, using the provided options if given.
-    static GridBase::Ptr readGrid(const GridDescriptor&, std::istream&,
-        const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics);
-    static GridBase::Ptr readGrid(const GridDescriptor&, std::istream&,
-        const io::ReadOptions& readOptions = io::ReadOptions{});
+    io::CodecData::Ptr readGridHeader(const GridDescriptor&, std::istream&,
+        const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics) const;
+    void readGridTopology(io::CodecData::Ptr& codecData, const GridDescriptor&, std::istream&,
+        const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics) const;
+    void readGridBuffers(io::CodecData::Ptr& codecData, const GridDescriptor&, std::istream&,
+        const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics) const;
 
     using NamedGridMap = std::map<Name /*uniqueName*/, GridBase::Ptr>;
 
@@ -159,17 +163,22 @@ protected:
     /// is an instance, connect it with its instance parent.
     void connectInstance(const GridDescriptor&, const NamedGridMap&) const;
 
-    /// Write the given grid descriptor and grid to an output stream
+    /// Write the given grid descriptor and grid header to an output stream
     /// and update the GridDescriptor offsets.
-    /// @param seekable  if true, the output stream supports seek operations
-    void writeGrid(GridDescriptor&, GridBase::ConstPtr, std::ostream&, bool seekable,
+    /// @param writeOffsets  if true, write the offsets to the output stream
+    void writeGridHeader(GridDescriptor&, GridBase::ConstPtr, std::ostream&, bool writeOffsets,
         const io::WriteOptions& writeOptions = io::WriteOptions{}) const;
-    /// Write the given grid descriptor and grid metadata to an output stream
-    /// and update the GridDescriptor offsets, but don't write the grid's tree,
-    /// since it is shared with another grid.
-    /// @param seekable  if true, the output stream supports seek operations
-    void writeGridInstance(GridDescriptor&, GridBase::ConstPtr,
-        std::ostream&, bool seekable, const io::WriteOptions& writeOptions = io::WriteOptions{}) const;
+
+    /// Write the given grid descriptor and grid topology to an output stream
+    /// and update the GridDescriptor offsets.
+    void writeGridTopology(GridDescriptor&, const io::Codec* codec, GridBase::ConstPtr, std::ostream&,
+        const io::WriteOptions& writeOptions = io::WriteOptions{}) const;
+
+    /// Write the given grid descriptor and grid buffers to an output stream
+    /// and update the GridDescriptor offsets.
+    /// @param writeOffsets  if true, write the offsets to the output stream
+    void writeGridBuffers(GridDescriptor&, const io::Codec* codec, GridBase::ConstPtr, std::ostream&, bool writeOffsets,
+        const io::WriteOptions& writeOptions = io::WriteOptions{}) const;
 
     /// @brief Read the magic number, version numbers, UUID, etc. from the given input stream.
     /// @return @c true if the input UUID differs from the previously-read UUID.
@@ -177,7 +186,7 @@ protected:
     /// @brief Write the magic number, version numbers, UUID, etc. to the given output stream.
     /// @param seekable  if true, the output stream supports seek operations
     /// @todo This method should not be const since it actually redefines the UUID!
-    void writeHeader(std::ostream&, bool seekable) const;
+    void writeHeader(std::ostream&, bool seekable, const io::WriteOptions& writeOptions = io::WriteOptions{}) const;
 
     //@{
     /// Write the given grids to an output stream.
@@ -201,7 +210,7 @@ private:
     mutable std::string mUuid;// needs to be mutable since writeHeader is const!
     /// Flag indicating whether the input stream contains grid offsets
     /// and therefore supports partial reading
-    bool mInputHasGridOffsets;
+    bool mInputHasGridOffsetsAtStart;
     /// Flag indicating whether a tree shared by multiple grids should be
     /// written out only once (true) or once per grid (false)
     bool mEnableInstancing;

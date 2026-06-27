@@ -201,14 +201,14 @@ TestStream::testFileReadFromStream()
 
     // Read the grids back in.
     io::File file(filename);
-    EXPECT_TRUE(file.inputHasGridOffsets());
+    EXPECT_TRUE(file.inputHasGridOffsetsAtStart());
     EXPECT_THROW(file.getGrids(), IoError);
 
     file.open();
     meta = file.getMetadata();
     grids = file.getGrids();
 
-    EXPECT_TRUE(!file.inputHasGridOffsets());
+    EXPECT_TRUE(!file.inputHasGridOffsetsAtStart());
     EXPECT_TRUE(meta.get() != nullptr);
     EXPECT_TRUE(grids.get() != nullptr);
     EXPECT_TRUE(!grids->empty());

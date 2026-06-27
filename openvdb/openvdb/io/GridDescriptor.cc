@@ -50,7 +50,7 @@ GridDescriptor::~GridDescriptor()
 }
 
 void
-GridDescriptor::writeHeader(std::ostream &os) const
+GridDescriptor::writeHeader(std::ostream &os, bool codec) const
 {
     writeString(os, mUniqueName);
 
@@ -59,6 +59,8 @@ GridDescriptor::writeHeader(std::ostream &os) const
     writeString(os, gridType);
 
     writeString(os, mInstanceParentName);
+
+    if (codec)  writeString(os, mCodecName);
 }
 
 void
@@ -70,7 +72,7 @@ GridDescriptor::writeStreamPos(std::ostream &os) const
 }
 
 void
-GridDescriptor::readHeader(std::istream &is)
+GridDescriptor::readHeader(std::istream &is, bool codec)
 {
     checkFormatVersion(is);
 
@@ -86,6 +88,9 @@ GridDescriptor::readHeader(std::istream &is)
     }
 
     mInstanceParentName = readString(is);
+
+    if (codec)  mCodecName = readString(is);
+    else        mCodecName = mGridType;
 }
 
 void
@@ -109,6 +114,18 @@ GridDescriptor::read(std::istream &is)
     GridBase::Ptr grid = GridBase::createGrid(mGridType);
     if (grid) grid->setSaveFloatAsHalf(mSaveFloatAsHalf);
     return grid;
+}
+
+void
+GridDescriptor::seekToTopology(std::istream &is) const
+{
+    is.seekg(mGridPos, std::ios_base::beg);
+}
+
+void
+GridDescriptor::seekToBuffers(std::istream &is) const
+{
+    is.seekg(mBlockPos, std::ios_base::beg);
 }
 
 void

@@ -310,7 +310,7 @@ struct PointDataCodec final: public TopologyCodec<GridT>
 
     static inline std::string name() { return GridT::gridType(); }
 
-    void readBuffers(std::istream& is, io::CodecData& data, const io::ReadOptions& options, io::ReadDiagnostics&) final
+    void readBuffers(std::istream& is, int64_t size, io::CodecData& data, const io::ReadOptions& options, io::ReadDiagnostics&) const final
     {
         OPENVDB_ASSERT(dynamic_cast<GridT*>(data.grid.get()));
 
@@ -405,7 +405,7 @@ struct PointDataCodec final: public TopologyCodec<GridT>
         }
     }
 
-    void writeBuffers(std::ostream& os, const GridBase& gridBase, const io::WriteOptions&) final
+    void writeBuffers(std::ostream& os, const GridBase& gridBase, const io::WriteOptions&) const final
     {
         const GridT& grid = static_cast<const GridT&>(gridBase);
         bool saveFloatAsHalf = grid.saveFloatAsHalf();

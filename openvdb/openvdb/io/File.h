@@ -15,6 +15,7 @@
 #include <iterator> // for std::back_inserter()
 #include <map>
 #include <memory>
+#include <vector>
 #include <string>
 
 
@@ -26,6 +27,8 @@ OPENVDB_USE_VERSION_NAMESPACE
 namespace OPENVDB_VERSION_NAME {
 namespace io {
 
+class ThrottledStreamBuf;
+
 /// Grid archive associated with a file on disk
 class OPENVDB_API File: public Archive
 {
@@ -33,8 +36,14 @@ public:
     using NameMap = std::multimap<Name, GridDescriptor>;
     using NameMapCIter = NameMap::const_iterator;
 
-    explicit File(const std::string& filename);
-    ~File() override { }
+    /// @param filename          The path of the file to read or write.
+    /// @param maximumBandwidth  The maximum read throughput in MB/s. A value of
+    ///                          -1 (or any value <= 0) reads at full speed using
+    ///                          a plain ifstream; a positive value throttles
+    ///                          reads to that rate and records the time spent
+    ///                          blocked on I/O (see readIOTimeMilliseconds()).
+    explicit File(const std::string& filename, int maximumBandwidth = -1);
+    ~File() override;
 
     /// @brief Copy constructor
     /// @details The copy will be closed and will not reference the same
@@ -70,6 +79,13 @@ public:
 
     /// Close the file once we are done reading from it.
     void close();
+
+    /// @brief Return the wall-clock time, in milliseconds, spent blocked on I/O
+    /// while reading this file.
+    /// @details This is only meaningful when the file was constructed with a
+    /// positive @c maximumBandwidth; otherwise it returns 0. The value remains
+    /// valid after close().
+    double readIOTimeMilliseconds() const;
 
     /// @brief Return this file's current size on disk in bytes.
     /// @throw IoError if the file size cannot be determined.
@@ -137,6 +153,9 @@ public:
 
         Name gridName() const { return GridDescriptor::nameAsString(mIter->second.uniqueName()); }
 
+        /// Return the name of the codec used to read/write this grid.
+        Name codecName() const { return mIter->second.codecName(); }
+
     private:
         NameMapCIter mIter;
     };
@@ -175,6 +194,16 @@ private:
     MetaMap::Ptr mMeta;
     // The file stream that is open for reading
     std::unique_ptr<std::istream> mInStream;
+    // Maximum read throughput in MB/s; <= 0 means unthrottled (full speed)
+    int mMaxBandwidth = -1;
+    // When throttling, owns the underlying file stream (kept alive for the
+    // lifetime of the throttling buffer that wraps its stream buffer)
+    std::unique_ptr<std::ifstream> mUnderlyingStream;
+    // When throttling, the buffer that limits read throughput and times I/O
+    std::unique_ptr<ThrottledStreamBuf> mThrottledBuf;
+    // Cached I/O time in milliseconds, captured on close() so it survives the
+    // reset of mThrottledBuf
+    double mIOTimeMilliseconds = 0.0;
     // File-level stream metadata (file format, compression, etc.)
     StreamMetadata::Ptr mStreamMetadata;
     // Flag indicating if we have read in the global information (header,
@@ -186,6 +215,12 @@ private:
     Archive::NamedGridMap mNamedGrids;
     // All grids stored in the file (used only when mHasGridOffsets is false)
     GridPtrVecPtr mGrids;
+    // Per-grid templates for the interleaved layout, in write order.
+    // Populated by open(); read-only thereafter. Each CodecData owns a
+    // GridBase with metadata + transform but no tree.
+    // The iterator points into mGridDescriptors (the single source of truth for
+    // GridDescriptor state); std::multimap guarantees iterator stability.
+    std::vector<std::pair<NameMap::iterator, io::CodecData::Ptr>> mInterleavedGrids;
 };
 
 

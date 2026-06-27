@@ -12,6 +12,8 @@
 #include <openvdb/util/logging.h>
 #include <openvdb/openvdb.h>
 
+#include <zstd.h>
+
 #include <atomic>
 
 #include <algorithm> // for std::find_if()
@@ -306,6 +308,27 @@ writeAsType(std::ostream& os, const std::any& val)
     return false;
 }
 
+/// @brief Remove transient write-time codec hint metadata from @a grid so it is
+/// not serialized into the file.
+/// @details These keys (the "zstd_" advanced compression parameters and
+/// "max_voxels_per_chunk") are attached to a grid solely to configure the codec
+/// for one write; the codec reads them while serializing the value buffers, so
+/// by the time the header metadata is written they have served their purpose.
+/// Persisting them would bloat every grid header with settings that are already
+/// recorded, far more compactly, inside each compressed block's own frame.
+inline void
+stripTransientCodecMetadata(MetaMap& grid)
+{
+    std::vector<Name> keysToRemove;
+    for (auto it = grid.beginMeta(); it != grid.endMeta(); ++it) {
+        const Name& key = it->first;
+        if (key == "max_voxels_per_chunk" || key.compare(0, 5, "zstd_") == 0) {
+            keysToRemove.push_back(key);
+        }
+    }
+    for (const Name& key : keysToRemove) grid.removeMeta(key);
+}
+
 } // unnamed namespace
 
 std::ostream&
@@ -364,7 +387,7 @@ Archive::Archive()
     : mFileVersion(OPENVDB_FILE_VERSION)
     , mLibraryVersion(OPENVDB_LIBRARY_MAJOR_VERSION, OPENVDB_LIBRARY_MINOR_VERSION)
     , mUuid()
-    , mInputHasGridOffsets(false)
+    , mInputHasGridOffsetsAtStart(false)
     , mEnableInstancing(true)
     , mCompression(DEFAULT_COMPRESSION_FLAGS)
     , mEnableGridStats(true)
@@ -747,9 +770,9 @@ Archive::readHeader(std::istream& is)
 
     // 2) Read the file format version number.
     is.read(reinterpret_cast<char*>(&mFileVersion), sizeof(uint32_t));
-    if (mFileVersion > OPENVDB_FILE_VERSION) {
+    if (mFileVersion > OPENVDB_MAX_FILE_VERSION) {
         OPENVDB_LOG_WARN("unsupported VDB file format (expected version "
-            << OPENVDB_FILE_VERSION << " or earlier, got version " << mFileVersion << ")");
+            << OPENVDB_MAX_FILE_VERSION << " or earlier, got version " << mFileVersion << ")");
     } else if (mFileVersion < OPENVDB_FILE_VERSION_FLOAT_FRUSTUM_BBOX) {
         OPENVDB_THROW(IoError,
             "VDB file version < 221 (FLOAT_FRUSTUM_BBOX) is no longer supported.");
@@ -765,10 +788,14 @@ Archive::readHeader(std::istream& is)
 
     // 4) Read the flag indicating whether the stream supports partial reading.
     //    (Versions prior to 212 have no flag because they always supported partial reading.)
-    mInputHasGridOffsets = true;
+    mInputHasGridOffsetsAtStart = true;
     char hasGridOffsets;
     is.read(&hasGridOffsets, sizeof(char));
-    mInputHasGridOffsets = hasGridOffsets;
+    if (mFileVersion >= OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT) {
+        mInputHasGridOffsetsAtStart = false;
+    } else {
+        mInputHasGridOffsetsAtStart = hasGridOffsets;
+    }
 
     // 5) Read the flag that indicates whether data is compressed.
     //    (From version 222 on, compression information is stored per grid.)
@@ -796,7 +823,7 @@ Archive::readHeader(std::istream& is)
 
 
 void
-Archive::writeHeader(std::ostream& os, bool seekable) const
+Archive::writeHeader(std::ostream& os, bool seekable, const io::WriteOptions& writeOptions) const
 {
     // 1) Write the magic number for VDB.
     int64_t magic = OPENVDB_MAGIC;
@@ -804,6 +831,9 @@ Archive::writeHeader(std::ostream& os, bool seekable) const
 
     // 2) Write the file format version number.
     uint32_t version = OPENVDB_FILE_VERSION;
+    if (writeOptions.layout == io::WriteLayout::Interleaved) {
+        version = OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT;
+    }
     os.write(reinterpret_cast<char*>(&version), sizeof(uint32_t));
 
     // 3) Write the library version numbers.
@@ -862,10 +892,7 @@ Archive::writeHeader(std::ostream& os, bool seekable) const
     mUuid = uuidStr; // mUuid is mutable
     // We don't write a string; but instead a fixed length buffer.
     // To match the old UUID, we need an extra 4 bytes for hyphens.
-    for (int i = 0; i < 16*2+4; i++)
-    {
-        os << uuidStr[i];
-    }
+    os.write(uuidStr, 16*2+4);
 }
 
 
@@ -884,21 +911,27 @@ Archive::readGridCount(std::istream& is)
 ////////////////////////////////////////
 
 
-io::Codec*
+std::pair<std::string, io::Codec*>
 Archive::findCodec(const std::string& gridType, const io::ReadOptions& options)
 {
+    auto lookup = [](const std::string& key) -> std::pair<Name, io::Codec*> {
+        io::Codec* codec = io::CodecRegistry::get(key);
+        if (!codec) return {"", nullptr};
+        return {key, codec};
+    };
+
     // if readMode is Half, then search for a codec that converts
     // from the storage grid type to the grid type
     if (options.readMode == ReadMode::Half) {
-        return io::CodecRegistry::get(gridType + "_to_half");
+        return lookup(gridType + "_to_half");
     } else if (options.readMode == ReadMode::Bool) {
-        return io::CodecRegistry::get(gridType + "_to_bool");
+        return lookup(gridType + "_to_bool");
     } else if (options.readMode == ReadMode::Mask) {
-        return io::CodecRegistry::get(gridType + "_to_mask");
+        return lookup(gridType + "_to_mask");
     }
 
     // Determine the I/O codec to use to read this grid
-    return io::CodecRegistry::get(gridType);
+    return lookup(gridType);
 }
 
 
@@ -935,43 +968,17 @@ Archive::connectInstance(const GridDescriptor& gd, const NamedGridMap& grids) co
 
 ////////////////////////////////////////
 
-
-GridBase::Ptr
-Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics)
+io::CodecData::Ptr
+Archive::readGridHeader(const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics) const
 {
     // Read the compression settings for this grid and tag the stream with them
     // so that downstream functions can reference them.
-    readGridCompression(is);
-
-    // Restore the file-level stream metadata on exit.
-    struct OnExit {
-        OnExit(std::ios_base& strm_): strm(&strm_), ptr(strm_.pword(GetSteamState().metadata)) {}
-        ~OnExit() { strm->pword(GetSteamState().metadata) = ptr; }
-        std::ios_base* strm;
-        void* ptr;
-    };
-    OnExit restore(is);
-
-    // Find the codec for the grid type and options.
-    io::Codec* codec = findCodec(gd.gridType(), readOptions);
-
-    GridBase::Ptr grid;
-    io::CodecData::Ptr codecData;
-
-    // Create the grid.
-    if (codec) {
-        codecData = codec->createData();
-        if (codecData->grid)    grid = codecData->grid;
-    } else {
-        if (!GridBase::isRegistered(gd.gridType())) {
-            OPENVDB_THROW(KeyError, "Cannot read grid "
-                << GridDescriptor::nameAsString(gd.uniqueName())
-                << ": grid type " << gd.gridType() << " is not registered");
-        }
-
-        grid = GridBase::createGrid(gd.gridType());
+    if (fileVersion() < OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT) {
+        readGridCompression(is);
     }
-    grid->setSaveFloatAsHalf(gd.saveFloatAsHalf());
+
+    // Retrieve the codec for the grid
+    auto [codecName, codec] = findCodec(gd.codecName(), readOptions);
 
 #ifndef OPENVDB_ENABLE_TREE_IO
     if (!codec) {
@@ -984,68 +991,69 @@ Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOpti
     }
 #endif
 
-    // Stream metadata varies per grid, and it needs to persist
-    // in case delayed load is in effect.
-    io::StreamMetadata::Ptr streamMetadata;
-    if (io::StreamMetadata::Ptr meta = io::getStreamMetadataPtr(is)) {
-        // Make a grid-level copy of the file-level stream metadata.
-        streamMetadata.reset(new StreamMetadata(*meta));
-    } else {
-        streamMetadata.reset(new StreamMetadata);
-    }
-    streamMetadata->setHalfFloat(grid->saveFloatAsHalf());
-    io::setStreamMetadataPtr(is, streamMetadata, /*transfer=*/false);
+    GridBase::Ptr grid;
+    io::CodecData::Ptr codecData;
 
-    io::setGridClass(is, GRID_UNKNOWN);
-    io::setGridBackgroundValuePtr(is, nullptr);
+    // Create the grid.
+    if (codec) {
+        codecData = codec->createData();
+        codecData->codec = codec;
+        if (codecData->grid)    grid = codecData->grid;
+    } else {
+        if (!GridBase::isRegistered(gd.gridType())) {
+            OPENVDB_THROW(KeyError, "Cannot read grid "
+                << GridDescriptor::nameAsString(gd.uniqueName())
+                << ": grid type " << gd.gridType() << " is not registered");
+        }
+
+        codecData = std::make_unique<io::CodecData>();
+        codecData->grid = GridBase::createGrid(gd.gridType());
+        grid = codecData->grid;
+    }
+    grid->setSaveFloatAsHalf(gd.saveFloatAsHalf());
 
     grid->readMeta(is);
-
-    // Delayed loading is no longer supported - always remove metadata related to delayed loading if it exists
-    if ((*grid)[GridBase::META_FILE_DELAYED_LOAD]) {
-        grid->removeMeta(GridBase::META_FILE_DELAYED_LOAD);
-    }
-
-    streamMetadata->gridMetadata() = static_cast<MetaMap&>(*grid);
-    const GridClass gridClass = grid->getGridClass();
-    io::setGridClass(is, gridClass);
-
     grid->readTransform(is);
-    if (readOptions.readMode != io::ReadMode::TopologyOnly && !gd.isInstance()) {
+
+    return codecData;
+}
+
+void
+Archive::readGridTopology(io::CodecData::Ptr& codecData, const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics) const
+{
+    if (!gd.isInstance()) {
         // read topology
-        if (codec) {
-            codec->readTopology(is, *codecData, readOptions, diagnostics);
+        if (codecData->codec) {
+            codecData->codec->readTopology(is, *codecData, readOptions, diagnostics);
         } else {
 #ifdef OPENVDB_ENABLE_TREE_IO
-            grid->readTopology(is);
+            codecData->grid->readTopology(is);
 #endif
         }
+    }
+}
+
+void
+Archive::readGridBuffers(io::CodecData::Ptr& codecData, const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions, ReadDiagnostics& diagnostics) const
+{
+    if (!gd.isInstance()) {
         // read buffers
-        if (codec) {
-            codec->readBuffers(is, *codecData, readOptions, diagnostics);
+        if (codecData->codec) {
+            const int64_t size = gd.getEndPos() - is.tellg();
+            codecData->codec->readBuffers(is, size, *codecData, readOptions, diagnostics);
         } else {
 #ifdef OPENVDB_ENABLE_TREE_IO
             const auto& worldBBox = readOptions.clipBBox;
             const bool clip = worldBBox.isSorted();
             if (clip) {
-                const auto indexBBox = grid->constTransform().worldToIndexNodeCentered(worldBBox);
-                grid->readBuffers(is, indexBBox);
+                const auto indexBBox = codecData->grid->constTransform().worldToIndexNodeCentered(worldBBox);
+                codecData->grid->readBuffers(is, indexBBox);
             } else {
-                grid->readBuffers(is);
+                codecData->grid->readBuffers(is);
             }
 #endif
         }
     }
-
-    return grid;
-}
-
-
-GridBase::Ptr
-Archive::readGrid(const GridDescriptor& gd, std::istream& is, const io::ReadOptions& readOptions)
-{
-    ReadDiagnostics nullDiagnostics;
-    return readGrid(gd, is, readOptions, nullDiagnostics);
 }
 
 
@@ -1073,16 +1081,15 @@ Archive::write(std::ostream& os, const GridCPtrVec& grids, bool seekable,
     io::setDataCompression(os, compression());
     io::setWriteGridStatsMetadata(os, isGridStatsMetadataEnabled());
 
-    this->writeHeader(os, seekable);
-
-    metadata.writeMeta(os);
+    this->writeHeader(os, seekable, writeOptions);
 
     // Write the number of non-null grids.
     int32_t gridCount = 0;
     for (GridCPtrVecCIter i = grids.begin(), e = grids.end(); i != e; ++i) {
         if (*i) ++gridCount;
     }
-    os.write(reinterpret_cast<char*>(&gridCount), sizeof(int32_t));
+
+    const bool interleavedLayout = writeOptions.layout == io::WriteLayout::Interleaved;
 
     using TreeMap = std::map<const TreeBase*, GridDescriptor>;
     using TreeMapIter = TreeMap::iterator;
@@ -1101,6 +1108,7 @@ Archive::write(std::ostream& os, const GridCPtrVec& grids, bool seekable,
     }
 
     std::set<std::string> uniqueNames;
+    std::vector<std::tuple<const GridBase::ConstPtr, GridDescriptor, io::Codec*>> gridsToWrite;
 
     // Write out the non-null grids.
     for (GridCPtrVecCIter i = grids.begin(), e = grids.end(); i != e; ++i) {
@@ -1121,6 +1129,27 @@ Archive::write(std::ostream& os, const GridCPtrVec& grids, bool seekable,
 
             // Create a grid descriptor.
             GridDescriptor gd(name, grid->type(), grid->saveFloatAsHalf());
+            std::string codecLookupName = gd.gridType();
+            if (interleavedLayout) {
+                auto codecMetadata = grid->getMetadata<StringMetadata>("codec");
+                if (codecMetadata) {
+                    codecLookupName = codecMetadata->str() + "_" + gd.gridType();
+                }
+            }
+            auto [codecName, codec] = findCodec(codecLookupName, io::ReadOptions{});
+
+#ifndef OPENVDB_ENABLE_TREE_IO
+            if (!codec) {
+                OPENVDB_THROW(IoError,
+                    "No I/O codec found for " << gd.gridType() << ", "
+                    << "register the codec for this grid type "
+                    << "(either explicitly or via openvdb::initialize()). "
+                    << "Note: Tree I/O is deprecated, "
+                    << "but can be re-enabled by recompiling with CMake OPENVDB_ENABLE_TREE_IO=ON.");
+            }
+#endif
+
+            gd.setCodecName(codecName);
 
             // Check if this grid's tree is shared with a grid that has already been written.
             const TreeBase* treePtr = &(grid->baseTree());
@@ -1133,8 +1162,6 @@ Archive::write(std::ostream& os, const GridCPtrVec& grids, bool seekable,
                 // This grid's tree is shared with another grid that has already been written.
                 // Get the name of the other grid.
                 gd.setInstanceParentName(mapIter->second.uniqueName());
-                // Write out this grid's descriptor and metadata, but not its tree.
-                writeGridInstance(gd, grid, os, seekable, writeOptions);
 
                 OPENVDB_LOG_DEBUG_RUNTIME("io::Archive::write(): "
                     << GridDescriptor::nameAsString(gd.uniqueName())
@@ -1142,75 +1169,147 @@ Archive::write(std::ostream& os, const GridCPtrVec& grids, bool seekable,
                     << " is an instance of "
                     << GridDescriptor::nameAsString(gd.instanceParentName()));
             } else {
-                // Write out the grid descriptor and its associated grid.
-                writeGrid(gd, grid, os, seekable, writeOptions);
                 // Record the grid's tree pointer so that the tree doesn't get written
                 // more than once.
                 treeMap[treePtr] = gd;
             }
+
+            gridsToWrite.emplace_back(grid, gd, codec);
+        }
+    }
+
+    if (interleavedLayout) {
+        // Bundle metadata + grid count + all grid headers into a local stream,
+        // compress with zstd, and write the compressed blob to disk.
+        static constexpr int kMetadataZstdLevel = 3;
+
+        std::ostringstream localStream(std::ios_base::binary);
+        metadata.writeMeta(localStream);
+        localStream.write(reinterpret_cast<const char*>(&gridCount), sizeof(int32_t));
+
+        // Write all grid headers into the local stream.
+        for (auto& [grid, gd, codec] : gridsToWrite) {
+            writeGridHeader(gd, grid, localStream, /*writeOffsets=*/false, writeOptions);
         }
 
-        // Some compression options (e.g., mask compression) are set per grid.
-        // Restore the original settings before writing the next grid.
-        io::setDataCompression(os, compression());
+        const std::string uncompressed = localStream.str();
+        const size_t dstCapacity = ZSTD_compressBound(uncompressed.size());
+        std::vector<char> compressed(dstCapacity);
+
+        const size_t compressedSize = ZSTD_compress(
+            compressed.data(), dstCapacity,
+            uncompressed.data(), uncompressed.size(),
+            kMetadataZstdLevel);
+        if (ZSTD_isError(compressedSize)) {
+            OPENVDB_THROW(IoError, "zstd compression of metadata failed: "
+                << ZSTD_getErrorName(compressedSize));
+        }
+
+        // Strip the 4-byte zstd magic number (0xFD2FB528) from the front of
+        // the compressed frame.  We store only the frame header and data blocks
+        // and re-prepend the magic on read.
+        static constexpr size_t kZstdMagicSize = 4;
+        static constexpr uint32_t kZstdMagicNumber = 0xFD2FB528;
+        uint32_t magic;
+        std::memcpy(&magic, compressed.data(), kZstdMagicSize);
+        if (magic != kZstdMagicNumber) {
+            OPENVDB_THROW(IoError, "zstd compressed frame missing expected magic number");
+        }
+
+        const uint64_t uncompressedSizeVal = uncompressed.size();
+        const uint64_t compressedSizeVal = compressedSize - kZstdMagicSize;
+        os.write(reinterpret_cast<const char*>(&uncompressedSizeVal), sizeof(uint64_t));
+        os.write(reinterpret_cast<const char*>(&compressedSizeVal), sizeof(uint64_t));
+        os.write(compressed.data() + kZstdMagicSize, compressedSizeVal);
+
+        // Write out all grid topology.
+        for (auto& [grid, gd, codec] : gridsToWrite) {
+            if (!gd.isInstance()) {
+                writeGridTopology(gd, codec, grid, os, writeOptions);
+            }
+        }
+        // Write out all grid buffers (no offsets, offset table is stored separately for interleaved layout).
+        for (auto& [grid, gd, codec] : gridsToWrite) {
+            if (!gd.isInstance()) {
+                writeGridBuffers(gd, codec, grid, os, /*writeOffsets=*/false, writeOptions);
+            }
+        }
+
+        // Write out grid offset table (at end of file).
+        int64_t offsetPos = os.tellp();
+        for (auto& [grid, gd, codec] : gridsToWrite) {
+            if (gd.isInstance()) continue;
+            const int64_t topologyPos = gd.getTopologyPos();
+            const int64_t dataPos = gd.getDataPos();
+            const int64_t endPos = gd.getEndPos();
+            os.write(reinterpret_cast<const char*>(&topologyPos), sizeof(int64_t));
+            os.write(reinterpret_cast<const char*>(&dataPos), sizeof(int64_t));
+            os.write(reinterpret_cast<const char*>(&endPos), sizeof(int64_t));
+        }
+        // The last integer in the file is the offset of the offset table itself.
+        os.write(reinterpret_cast<const char*>(&offsetPos), sizeof(int64_t));
+    } else {
+        metadata.writeMeta(os);
+        os.write(reinterpret_cast<char*>(&gridCount), sizeof(int32_t));
+
+        for (auto& [grid, gd, codec] : gridsToWrite) {
+            if (gd.isInstance()) {
+                // Write out this grid's descriptor and metadata, but not its tree.
+                writeGridHeader(gd, grid, os, seekable, writeOptions);
+
+                if (seekable) {
+                    gd.setEndPos(os.tellp());
+                    // Now, go back to where the Descriptor's offset information is written
+                    // and write the offsets again.
+                    os.seekp(gd.getOffsetPos(), std::ios_base::beg);
+                    gd.writeStreamPos(os);
+
+                    // Now seek back to the end.
+                    gd.seekToEnd(os);
+                }
+            } else {
+                // Write out the grid descriptor and its associated grid.
+                writeGridHeader(gd, grid, os, seekable, writeOptions);
+                writeGridTopology(gd, codec, grid, os, writeOptions);
+                writeGridBuffers(gd, codec, grid, os, seekable, writeOptions);
+            }
+
+            // Some compression options (e.g., mask compression) are set per grid.
+            // Restore the original settings before writing the next grid.
+            io::setDataCompression(os, compression());
+        }
     }
 }
 
 
 void
-Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
-    std::ostream& os, bool seekable, const io::WriteOptions& writeOptions) const
+Archive::writeGridHeader(GridDescriptor& gd, GridBase::ConstPtr grid,
+    std::ostream& os, bool writeOffsets, const io::WriteOptions& writeOptions) const
 {
-    // Restore file-level stream metadata on exit.
-    struct OnExit {
-        OnExit(std::ios_base& strm_): strm(&strm_), ptr(strm_.pword(GetSteamState().metadata)) {}
-        ~OnExit() { strm->pword(GetSteamState().metadata) = ptr; }
-        std::ios_base* strm;
-        void* ptr;
-    };
-    OnExit restore(os);
-
-    // Find the codec for the grid type and options.
-    io::Codec* codec = findCodec(gd.gridType());
-
-#ifndef OPENVDB_ENABLE_TREE_IO
-    if (!codec) {
-        OPENVDB_THROW(IoError,
-            "No I/O codec found for " << gd.gridType() << ", "
-            << "register the codec for this grid type "
-            << "(either explicitly or via openvdb::initialize()). "
-            << "Note: Tree I/O is deprecated, "
-            << "but can be re-enabled by recompiling with CMake OPENVDB_ENABLE_TREE_IO=ON.");
-    }
-#endif
-
-    // Stream metadata varies per grid, so make a copy of the file-level stream metadata.
-    io::StreamMetadata::Ptr streamMetadata;
-    if (io::StreamMetadata::Ptr meta = io::getStreamMetadataPtr(os)) {
-        streamMetadata.reset(new StreamMetadata(*meta));
-    } else {
-        streamMetadata.reset(new StreamMetadata);
-    }
-    streamMetadata->setHalfFloat(grid->saveFloatAsHalf());
-    streamMetadata->gridMetadata() = static_cast<const MetaMap&>(*grid);
-    io::setStreamMetadataPtr(os, streamMetadata, /*transfer=*/false);
+    const bool interleavedLayout = writeOptions.layout == io::WriteLayout::Interleaved;
 
     // Write out the Descriptor's header information (grid name and type)
-    gd.writeHeader(os);
+    gd.writeHeader(os, /*writeCodec=*/interleavedLayout);
 
-    // Save the curent stream position as postion to where the offsets for
-    // this GridDescriptor will be written to.
-    int64_t offsetPos = (seekable ? int64_t(os.tellp()) : 0);
+    if (writeOffsets) {
+        // Save the curent stream position as postion to where the offsets for
+        // this GridDescriptor will be written to.
+        gd.setOffsetPos(os.tellp());
 
-    // Write out the offset information. At this point it will be incorrect.
-    // But we need to write it out to move the stream head forward.
-    gd.writeStreamPos(os);
+        // Write out the offset information. At this point it will be incorrect.
+        // But we need to write it out to move the stream head forward.
+        gd.writeStreamPos(os);
 
-    // Now we know the starting grid storage position.
-    if (seekable) gd.setGridPos(os.tellp());
+        // Now we know the starting grid storage position.
+        gd.setGridPos(os.tellp());
+    }
 
-    // Save the compression settings for this grid.
-    setGridCompression(os, *grid);
+    // For legacy (non-interleaved) layout, write per-grid compression settings.
+    // readGridHeader() always reads these for fileVersion < OPENVDB_FILE_VERSION_INTERLEAVED_LAYOUT,
+    // so they must be present whether or not the stream is seekable.
+    if (!interleavedLayout) {
+        setGridCompression(os, *grid);
+    }
 
     // Save the grid's metadata and transform.
     if (getWriteGridStatsMetadata(os)) {
@@ -1220,11 +1319,31 @@ Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
         nonConstCopyOfGrid->addStatsMetadata();
         nonConstCopyOfGrid->insertMeta(GridBase::META_FILE_COMPRESSION,
             StringMetadata(compressionToString(getDataCompression(os))));
+        stripTransientCodecMetadata(*nonConstCopyOfGrid);
         copyOfGrid->writeMeta(os);
     } else {
-        grid->writeMeta(os);
+        // Strip transient write-time codec hints (e.g. the "zstd_*" advanced
+        // compression parameters and "max_voxels_per_chunk") from a shallow copy
+        // so they are not persisted in the file. The codec has already consumed
+        // them by the time the buffers are written, and the per-chunk zstd
+        // settings they request are recorded far more compactly in each
+        // compressed block's own frame header.
+        const auto copyOfGrid = grid->copyGrid(); // shallow copy
+        const auto nonConstCopyOfGrid = ConstPtrCast<GridBase>(copyOfGrid);
+        stripTransientCodecMetadata(*nonConstCopyOfGrid);
+        copyOfGrid->writeMeta(os);
     }
     grid->writeTransform(os);
+}
+
+
+void
+Archive::writeGridTopology(GridDescriptor& gd, const io::Codec* codec, GridBase::ConstPtr grid,
+    std::ostream& os, const io::WriteOptions& writeOptions) const
+{
+    const bool interleavedLayout = writeOptions.layout == io::WriteLayout::Interleaved;
+
+    if (interleavedLayout)  gd.setTopologyPos(os.tellp());
 
     // Save the grid's structure.
     if (codec) {
@@ -1234,9 +1353,13 @@ Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
         grid->writeTopology(os);
 #endif
     }
+}
 
-    // Now we know the grid block storage position.
-    if (seekable) gd.setBlockPos(os.tellp());
+void
+Archive::writeGridBuffers(GridDescriptor& gd, const io::Codec* codec, GridBase::ConstPtr grid,
+    std::ostream& os, bool writeOffsets, const io::WriteOptions& writeOptions) const
+{
+    gd.setBlockPos(os.tellp());
 
     // Save out the data blocks of the grid.
     if (codec) {
@@ -1247,54 +1370,12 @@ Archive::writeGrid(GridDescriptor& gd, GridBase::ConstPtr grid,
 #endif
     }
 
-    // Now we know the end position of this grid.
-    if (seekable) gd.setEndPos(os.tellp());
+    gd.setEndPos(os.tellp());
 
-    if (seekable) {
+    if (writeOffsets) {
         // Now, go back to where the Descriptor's offset information is written
         // and write the offsets again.
-        os.seekp(offsetPos, std::ios_base::beg);
-        gd.writeStreamPos(os);
-
-        // Now seek back to the end.
-        gd.seekToEnd(os);
-    }
-}
-
-
-void
-Archive::writeGridInstance(GridDescriptor& gd, GridBase::ConstPtr grid,
-    std::ostream& os, bool seekable, const io::WriteOptions&) const
-{
-    // Write out the Descriptor's header information (grid name, type
-    // and instance parent name).
-    gd.writeHeader(os);
-
-    // Save the curent stream position as postion to where the offsets for
-    // this GridDescriptor will be written to.
-    int64_t offsetPos = (seekable ? int64_t(os.tellp()) : 0);
-
-    // Write out the offset information. At this point it will be incorrect.
-    // But we need to write it out to move the stream head forward.
-    gd.writeStreamPos(os);
-
-    // Now we know the starting grid storage position.
-    if (seekable) gd.setGridPos(os.tellp());
-
-    // Save the compression settings for this grid.
-    setGridCompression(os, *grid);
-
-    // Save the grid's metadata and transform.
-    grid->writeMeta(os);
-    grid->writeTransform(os);
-
-    // Now we know the end position of this grid.
-    if (seekable) gd.setEndPos(os.tellp());
-
-    if (seekable) {
-        // Now, go back to where the Descriptor's offset information is written
-        // and write the offsets again.
-        os.seekp(offsetPos, std::ios_base::beg);
+        os.seekp(gd.getOffsetPos(), std::ios_base::beg);
         gd.writeStreamPos(os);
 
         // Now seek back to the end.
