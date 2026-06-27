@@ -16,9 +16,6 @@
 #include <string>
 
 
-#include <appstats/HoudiniAppStats.h>
-
-
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
 
@@ -40,9 +37,11 @@ public:
         return (input == 0);
     }
 
+    class Cache: public SOP_VDBCacheOptions { OP_ERROR cookVDBSop(OP_Context&) override; };
+
 protected:
-    OP_ERROR cookVDBSop(OP_Context&) override;
     bool updateParmsFlags() override;
+    void resolveObsoleteParms(PRM_ParmList*) override;
 };
 
 
@@ -143,11 +142,25 @@ newSopOperator(OP_OperatorTable* table)
 
     hutil::ParmList parms;
 
-    // Metadata-only toggle
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "metadata_only", "Read Metadata Only")
+    // Read mode menu
+    parms.add(hutil::ParmFactory(PRM_ORD, "readmode", "Read Mode")
         .setDefault(PRMzeroDefaults)
+        .setChoiceListItems(PRM_CHOICELIST_SINGLE, {
+            "full",     "All VDB Data",
+            "metadata", "Metadata Only",
+            "topology", "Topology Only",
+            "preview",  "Preview",
+            "half",     "As Half VDB",
+            "bool",     "As Bool VDB"
+        })
         .setTooltip(
-            "If enabled, output empty VDBs populated with their metadata and transforms only."));
+            "All VDB Data: read full grids.\n"
+            "Metadata Only: output empty VDBs populated with their metadata"
+            " and transforms only.\n"
+            "Topology Only: read only the topology of the VDB.\n"
+            "Preview: (not yet implemented; reads full data).\n"
+            "As Half VDB: read the VDB as a half VDB.\n"
+            "As Bool VDB: read the VDB as a bool VDB."));
 
     // Clipping toggle
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "clip", "Clip to Reference Bounds")
@@ -210,6 +223,8 @@ newSopOperator(OP_OperatorTable* table)
 
     // Obsolete parameters
     hutil::ParmList obsoleteParms;
+    obsoleteParms.add(hutil::ParmFactory(PRM_TOGGLE, "metadata_only", "Read Metadata Only")
+        .setDefault(PRMzeroDefaults));
     obsoleteParms.add(hutil::ParmFactory(PRM_SEPARATOR, "sep1", "Sep"));
     obsoleteParms.add(hutil::ParmFactory(PRM_TOGGLE, "delayload", "Delay Loading")
         .setDefault(PRMoneDefaults));
@@ -223,6 +238,7 @@ newSopOperator(OP_OperatorTable* table)
         .setNativeName("")
         .setObsoleteParms(obsoleteParms)
         .addOptionalInput("Optional Bounding Geometry")
+        .setVerb(SOP_NodeVerb::COOK_GENERATOR, []() { return new SOP_OpenVDB_Read::Cache; })
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\
@@ -279,24 +295,36 @@ SOP_OpenVDB_Read::updateParmsFlags()
 }
 
 
+void
+SOP_OpenVDB_Read::resolveObsoleteParms(PRM_ParmList* obsoleteParms)
+{
+    if (!obsoleteParms) return;
+
+    PRM_Parm* parm = obsoleteParms->getParmPtr("metadata_only");
+    if (parm && !parm->isFactoryDefault()) {
+        // The old "Read Metadata Only" toggle was enabled; select the
+        // corresponding "Metadata Only" entry (index 1) in the new menu.
+        setInt("readmode", 0, 0.0, 1);
+    }
+
+    hvdb::SOP_NodeVDB::resolveObsoleteParms(obsoleteParms);
+}
+
+
 ////////////////////////////////////////
 
 
 OP_ERROR
-SOP_OpenVDB_Read::cookVDBSop(OP_Context& context)
+SOP_OpenVDB_Read::Cache::cookVDBSop(OP_Context& context)
 {
-    HoudiniAppStats::ScopedTimer timer(getOperator()->getName());
-
     try {
-        hutil::ScopedInputLock lock(*this, context);
-
         gdp->clearAndDestroy();
 
         const fpreal t = context.getTime();
 
-        const bool
-            readMetadataOnly = evalInt("metadata_only", 0, t),
-            missingFrameIsError = (0 == evalInt("missingframe", 0, t));
+        const exint readMode = evalInt("readmode", 0, t);
+
+        const bool missingFrameIsError = (0 == evalInt("missingframe", 0, t));
 
         // Get the file name string from the UI.
         const std::string filename = evalStdString("file_name", t);
@@ -379,12 +407,32 @@ SOP_OpenVDB_Read::cookVDBSop(OP_Context& context)
             if (!UT_String(gridName).multiMatch(gridStr.buffer(), 1, " ")) continue;
 
             hvdb::GridPtr grid;
-            if (readMetadataOnly) {
+            if (readMode == 1 /*metadata only*/) {
                 grid = file.readGridMetadata(gridName);
-            } else if (clip) {
-                grid = file.readGrid(gridName, clipBBox);
             } else {
-                grid = file.readGrid(gridName);
+
+                // "full",     "All VDB Data",
+                // "metadata", "Metadata Only",
+                // "topology", "Topology Only",
+                // "preview",  "Preview",
+                // "half",     "As Half VDB",
+                // "bool",     "As Bool VDB"
+
+                openvdb::io::ReadOptions readOptions;
+                if (readMode == 2 /*topology only*/) {
+                    readOptions.readMode = openvdb::io::ReadMode::TopologyOnly;
+                } else if (readMode == 3 /*preview*/) {
+                    // Not Implemented
+                    readOptions.readMode = openvdb::io::ReadMode::Original;
+                } else if (readMode == 4 /*half*/) {
+                    readOptions.readMode = openvdb::io::ReadMode::Half;
+                } else if (readMode == 5 /*bool*/) {
+                    readOptions.readMode = openvdb::io::ReadMode::Bool;
+                }
+                if (clip) {
+                    readOptions.clipBBox = clipBBox;
+                }
+                grid = file.readGrid(gridName, readOptions);
             }
             if (grid) {
                 // Copy file-level metadata into the grid, then create (if necessary)

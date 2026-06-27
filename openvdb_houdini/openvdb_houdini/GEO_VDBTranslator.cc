@@ -249,6 +249,7 @@ fileSaveVDB(const GEO_Detail *geogdp, OutputT os)
         // Populate an output GridMap with VDB grid primitives found in the
         // geometry.
         openvdb::GridPtrVec outGrids;
+        bool useInterleavedLayout = false;
         for (VdbPrimCIterator it(gdp); it; ++it) {
             const GU_PrimVDB* vdb = *it;
 
@@ -257,6 +258,8 @@ fileSaveVDB(const GEO_Detail *geogdp, OutputT os)
             GridPtr grid = openvdb::ConstPtrCast<Grid>(vdb->getGrid().copyGrid());
             GU_PrimVDB::createMetadataFromGridAttrs(*grid, *vdb, *gdp);
             grid->removeMeta("is_vdb");
+
+            if (!useInterleavedLayout && (*grid)["codec"])   useInterleavedLayout = true;
 
             // Retrieve the grid's name from the primitive attribute.
             grid->setName(it.getPrimitiveName().toStdString());
@@ -292,7 +295,11 @@ fileSaveVDB(const GEO_Detail *geogdp, OutputT os)
         }
         file.setCompression(compression);
 
-        file.write(outGrids, fileMetadata);
+        openvdb::io::WriteOptions writeOptions;
+        if (useInterleavedLayout) {
+            writeOptions.layout = openvdb::io::WriteLayout::Interleaved;
+        }
+        file.write(outGrids, fileMetadata, writeOptions);
 
     } catch (std::exception &e) {
         cerr << "Save failure: " << e.what() << "\n";
