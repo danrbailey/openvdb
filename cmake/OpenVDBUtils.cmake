@@ -55,6 +55,15 @@ The following functions are provided:
   If the binary does not exist or fails to launch, variables are
   unmodified.
 
+``OPENVDB_FIND_ZSTD``
+
+  OPENVDB_FIND_ZSTD ( [<version>] )
+
+  Find a zstd installation and provide the zstd::zstd target. The CMake
+  config shipped with zstd is preferred. If it is not found, the FindZstd
+  module is used instead. A static library is chosen if ZSTD_USE_STATIC_LIBS
+  is set or no shared library is available. Fails if zstd is not found.
+
 #]=======================================================================]
 
 cmake_minimum_required(VERSION 3.24)
@@ -274,3 +283,23 @@ function(OPENVDB_COMPUTE_X86_INSTRSET_FROM_VCL VCL_INSTRSET)
   set(${VCL_INSTRSET} 0 PARENT_SCOPE)
   set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
 endfunction()
+
+########################################################################
+########################################################################
+
+macro(OPENVDB_FIND_ZSTD)
+  find_package(zstd ${ARGN} QUIET CONFIG)
+  if(NOT zstd_FOUND)
+    find_package(Zstd ${ARGN} REQUIRED)
+  endif()
+
+  if(NOT TARGET zstd::zstd)
+    if(TARGET zstd::libzstd_static AND (ZSTD_USE_STATIC_LIBS OR NOT TARGET zstd::libzstd_shared))
+      add_library(zstd::zstd ALIAS zstd::libzstd_static)
+    elseif(TARGET zstd::libzstd_shared)
+      add_library(zstd::zstd ALIAS zstd::libzstd_shared)
+    else()
+      add_library(zstd::zstd ALIAS Zstd::zstd)
+    endif()
+  endif()
+endmacro()
