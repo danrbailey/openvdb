@@ -513,7 +513,7 @@ if(OPENVDB_BUILD_PYTHON_MODULE OR (OPENVDB_BUILD_NANOVDB AND NANOVDB_BUILD_PYTHO
     endif()
   endif()
 
-  find_package(nanobind REQUIRED CONFIG)
+  find_package(nanobind ${MINIMUM_NANOBIND_VERSION} REQUIRED CONFIG)
   include(FindPackageHandleStandardArgs)
   find_package_handle_standard_args(nanobind
     FOUND_VAR nanobind_FOUND
