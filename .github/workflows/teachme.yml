@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ (github.repository_owner == 'AcademySoftwareFoundation' && 'ubuntu-latest-8c-32g-300h') || 'ubuntu-latest' }}
     name: teachme-docs-compile
     container:
-      image: aswf/ci-openvdb:2024-clang17.2
+      image: aswf/ci-openvdb:2027
     env:
       # Compile-only target; matches the arch used by the other NanoVDB jobs.
       CUDAARCHS: "80"
