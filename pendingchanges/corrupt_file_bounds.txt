@@ -1,0 +1,11 @@
+Improvements:
+  - Reading a corrupt VDB file no longer allocates memory from untrusted
+    string lengths, metadata sizes, grid counts or attribute counts. Strings
+    and metadata are read in chunks, so allocation follows the bytes the
+    stream really holds. Reported by Larry Gritz.
+Bug Fixes:
+  - openvdb::readString(), metadata reads, grid count and grid descriptor
+    reads now throw IoError on a truncated stream instead of returning
+    uninitialized or partial values.
+  - io::File::open() throws IoError when a grid descriptor has stream
+    offsets that point backwards or past the end of the file.

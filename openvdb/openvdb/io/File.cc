@@ -252,11 +252,22 @@ File::open()
     } else {
         mGridDescriptors.clear();
 
+        const int64_t fileSize = int64_t(this->getSize());
         for (int32_t i = 0, N = readGridCount(inputStream()); i < N; ++i) {
             // Read the grid descriptor.
             GridDescriptor gd;
             gd.readHeader(inputStream());
             gd.readStreamPos(inputStream());
+
+            // Offsets must move forward within the file, otherwise a corrupt
+            // file can make this loop read the same descriptor repeatedly.
+            const int64_t descriptorEnd = int64_t(inputStream().tellg());
+            if (gd.getGridPos() < descriptorEnd || gd.getEndPos() < gd.getGridPos() ||
+                gd.getEndPos() > fileSize) {
+                OPENVDB_THROW(IoError, mFilename << ": grid "
+                    << GridDescriptor::nameAsString(gd.uniqueName())
+                    << " has invalid stream offsets");
+            }
 
             // Add the descriptor to the dictionary.
             mGridDescriptors.insert(std::make_pair(gd.gridName(), gd));

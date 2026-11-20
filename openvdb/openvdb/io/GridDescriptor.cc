@@ -94,6 +94,7 @@ GridDescriptor::readStreamPos(std::istream &is)
     is.read(reinterpret_cast<char*>(&mGridPos), sizeof(int64_t));
     is.read(reinterpret_cast<char*>(&mBlockPos), sizeof(int64_t));
     is.read(reinterpret_cast<char*>(&mEndPos), sizeof(int64_t));
+    openvdb::internal::checkStream(is, "grid stream offsets");
 }
 
 void

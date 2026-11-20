@@ -1342,12 +1342,16 @@ AttributeSet::Descriptor::read(std::istream& is)
 {
     Index64 arraylength = 0;
     is.read(reinterpret_cast<char*>(&arraylength), sizeof(Index64));
+    openvdb::internal::checkStream(is, "attribute count");
 
-    std::vector<NamePair>(size_t(arraylength)).swap(mTypes);
-
-    for (NamePair& np : mTypes) {
+    // Each entry is read before the next is added, so a corrupt length
+    // stops at the end of the stream instead of allocating up front.
+    mTypes.clear();
+    for (Index64 n = 0; n < arraylength; ++n) {
+        NamePair np;
         np.first = readString(is);
         np.second = readString(is);
+        mTypes.push_back(std::move(np));
     }
 
     mNameMap.clear();
@@ -1357,16 +1361,19 @@ AttributeSet::Descriptor::read(std::istream& is)
         nameAndOffset.first = readString(is);
         if (!validName(nameAndOffset.first))  throw IoError("Attribute name contains invalid characters - " + nameAndOffset.first);
         is.read(reinterpret_cast<char*>(&nameAndOffset.second), sizeof(Index64));
+        openvdb::internal::checkStream(is, "attribute offset");
         mNameMap.insert(nameAndOffset);
     }
 
     Index64 grouplength = 0;
     is.read(reinterpret_cast<char*>(&grouplength), sizeof(Index64));
+    openvdb::internal::checkStream(is, "group count");
 
     for (Index64 n = 0; n < grouplength; ++n) {
         nameAndOffset.first = readString(is);
         if (!validName(nameAndOffset.first))  throw IoError("Group name contains invalid characters - " + nameAndOffset.first);
         is.read(reinterpret_cast<char*>(&nameAndOffset.second), sizeof(Index64));
+        openvdb::internal::checkStream(is, "group offset");
         mGroupMap.insert(nameAndOffset);
     }
 

@@ -746,7 +746,7 @@ bool
 Archive::readHeader(std::istream& is)
 {
     // 1) Read the magic number for VDB.
-    int64_t magic;
+    int64_t magic = 0;
     is.read(reinterpret_cast<char*>(&magic), sizeof(int64_t));
 
     if (magic != OPENVDB_MAGIC) {
@@ -755,6 +755,7 @@ Archive::readHeader(std::istream& is)
 
     // 2) Read the file format version number.
     is.read(reinterpret_cast<char*>(&mFileVersion), sizeof(uint32_t));
+    openvdb::internal::checkStream(is, "the file header");
     if (mFileVersion >= OPENVDB_UNSUPPORTED_FILE_VERSION) {
         OPENVDB_THROW(IoError, "unsupported VDB file format (expected version "
             << OPENVDB_FILE_VERSION << " or earlier, got version " << mFileVersion
@@ -806,6 +807,7 @@ Archive::readHeader(std::istream& is)
     char uuidValues[16*2+4+1];
     is.read(uuidValues, 16*2+4);
     uuidValues[16*2+4] = 0;
+    openvdb::internal::checkStream(is, "the file header");
     mUuid = uuidValues;
 
     // CHeck if new and old uuid differ.  If either are blank, they
@@ -897,6 +899,8 @@ Archive::readGridCount(std::istream& is)
 {
     int32_t gridCount = 0;
     is.read(reinterpret_cast<char*>(&gridCount), sizeof(int32_t));
+    openvdb::internal::checkStream(is, "the grid count");
+    if (gridCount < 0) OPENVDB_THROW(IoError, "invalid grid count " << gridCount);
     return gridCount;
 }
 

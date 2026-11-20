@@ -182,6 +182,7 @@ Metadata::readSize(std::istream& is)
 {
     Index32 n = 0;
     is.read(reinterpret_cast<char*>(&n), sizeof(Index32));
+    openvdb::internal::checkStream(is, "metadata size");
     return n;
 }
 
@@ -284,6 +285,7 @@ TypedMetadata<T>::readValue(std::istream& is, [[maybe_unused]] Index32 numBytes)
 {
     OPENVDB_ASSERT(this->size() == numBytes);
     is.read(reinterpret_cast<char*>(&mValue), this->size());
+    openvdb::internal::checkStream(is, "metadata value");
 }
 
 template<typename T>
@@ -399,8 +401,7 @@ template<>
 inline void
 StringMetadata::readValue(std::istream& is, Index32 size)
 {
-    mValue.resize(size, '\0');
-    is.read(&mValue[0], size);
+    openvdb::internal::readSizedBuffer(is, mValue, size, "string metadata");
 }
 
 template<>

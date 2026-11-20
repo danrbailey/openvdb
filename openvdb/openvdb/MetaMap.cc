@@ -57,6 +57,7 @@ MetaMap::readMeta(std::istream &is)
     // Read in the number of metadata items.
     Index32 count = 0;
     is.read(reinterpret_cast<char*>(&count), sizeof(Index32));
+    openvdb::internal::checkStream(is, "metadata count");
 
     // Read in each metadata.
     for (Index32 i = 0; i < count; ++i) {
